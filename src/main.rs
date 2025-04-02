@@ -1,7 +1,8 @@
-use axum::{Router, routing::get};
+use axum::{Router, routing::get, response::Html};
 use std::fs::File; 
 use std::io::BufReader; 
 use rodio::{Decoder, OutputStream, source::Source, Sink};
+
 
 #[tokio::main]
 async fn main() {
@@ -15,24 +16,28 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-
-async fn serve_index() -> &'static str { 
-   include_str!("../assets/index.html")
-
+async fn serve_index() -> Html<String> {
+   Html(include_str!("../assets/index.html").to_string())
 }
 
 async fn play_music(){ 
- let(_stream, stream_handle) = OutputStream::try_default().unwrap();
 
- let sink = Sink::try_new(&stream_handle).unwrap(); 
+        tokio::spawn(async move { 
+            let(_stream, stream_handle) = OutputStream::try_default().unwrap();
 
- let file = BufReader::new(File::open("assets/song1.flac").unwrap());
-let source = Decoder::new(file).unwrap();
+            let sink = Sink::try_new(&stream_handle).unwrap(); 
+            let file = BufReader::new(File::open("assets/song1.flac").unwrap());
+            let source = Decoder::new(file).unwrap();
 
-sink.append(source); 
+            sink.append(source); 
 
-sink.sleep_until_end();
+            sink.sleep_until_end();
+        });
 
     
+
+
 }
+
+
 
