@@ -4,16 +4,234 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Rust Music Player</title>
-    </head>
-  <body>
-    <script>
-      function play_song1(){ 
-        fetch("/play/song1")
-
-      }
-    </script>
-    <h1>Rust Music Player!</h1>
-    <div> 
-      <button onClick = play_song1()>Play song 1</button>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .container {
+            background-color: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin: 20px 0;
+        }
+        button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 10px 15px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #stopBtn, #pauseBtn {
+            background-color: #f44336;
+        }
+        #stopBtn:hover, #pauseBtn:hover {
+            background-color: #d32f2f;
+        }
+        #library, #songs {
+            list-style-type: none;
+            padding: 0;
+        }
+        #library li, #songs li {
+            padding: 10px;
+            background-color: #f9f9f9;
+            margin-bottom: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        #library li:hover, #songs li:hover {
+            background-color: #e9e9e9;
+        }
+        .section {
+            margin-bottom: 20px;
+        }
+        .now-playing {
+            text-align: center;
+            margin: 20px 0;
+            font-weight: bold;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Rust Music Player</h1>
+        
+        <div class="now-playing" id="nowPlaying">
+            Not playing
+        </div>
+        
+        <div class="controls">
+            <button id="pauseBtn" disabled>Pause</button>
+            <button id="stopBtn" disabled>Stop</button>
+        </div>
+        
+        <div class="section">
+            <h2>Music Library</h2>
+            <ul id="library"></ul>
+        </div>
+        
+        <div class="section hidden" id="songsSection">
+            <h2 id="artistHeader">Songs</h2>
+            <button id="backBtn">Back to Library</button>
+            <ul id="songs"></ul>
+        </div>
     </div>
-  </body>
+
+    <script>
+        // Elements
+        const libraryList = document.getElementById('library');
+        const songsList = document.getElementById('songs');
+        const songsSection = document.getElementById('songsSection');
+        const artistHeader = document.getElementById('artistHeader');
+        const nowPlaying = document.getElementById('nowPlaying');
+        const pauseBtn = document.getElementById('pauseBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const backBtn = document.getElementById('backBtn');
+
+        // State
+        let currentArtist = '';
+        let currentSong = '';
+        let isPlaying = false;
+
+        // Fetch music library on page load
+        window.addEventListener('DOMContentLoaded', fetchLibrary);
+
+        // Event listeners
+        pauseBtn.addEventListener('click', pauseMusic);
+        stopBtn.addEventListener('click', stopMusic);
+        backBtn.addEventListener('click', () => {
+            songsSection.classList.add('hidden');
+            currentArtist = '';
+        });
+
+        // Fetch the music library from the server
+        async function fetchLibrary() {
+            try {
+                const response = await fetch('/get_library');
+                const artists = await response.json();
+                
+                libraryList.innerHTML = '';
+                artists.forEach(artist => {
+                    const li = document.createElement('li');
+                    li.textContent = artist;
+                    li.addEventListener('click', () => loadArtistSongs(artist));
+                    libraryList.appendChild(li);
+                });
+            } catch (error) {
+                console.error('Error fetching library:', error);
+            }
+        }
+
+        // Load songs for a specific artist
+        async function loadArtistSongs(artist) {
+            try {
+                currentArtist = artist;
+                artistHeader.textContent = `${artist} - Songs`;
+                
+                const response = await fetch(`/${encodeURIComponent(artist)}`);
+                const songs = await response.json();
+                
+                songsList.innerHTML = '';
+                songs.forEach(song => {
+                    const li = document.createElement('li');
+                    li.textContent = song;
+                    li.addEventListener('click', () => playSong(artist, song));
+                    songsList.appendChild(li);
+                });
+                
+                songsSection.classList.remove('hidden');
+            } catch (error) {
+                console.error('Error loading artist songs:', error);
+            }
+        }
+
+        // Play a song
+        async function playSong(artist, song) {
+            try {
+                const response = await fetch(`/play/${encodeURIComponent(artist)}/${encodeURIComponent(song)}`);
+                if (response.ok) {
+                    currentSong = song;
+                    isPlaying = true;
+                    nowPlaying.textContent = `Now Playing: ${artist} - ${song}`;
+                    updateControlButtons();
+                }
+            } catch (error) {
+                console.error('Error playing song:', error);
+            }
+        }
+
+        // Pause music
+        async function pauseMusic() {
+            try {
+                const response = await fetch('/pause');
+                if (response.ok) {
+                    isPlaying = false;
+                    nowPlaying.textContent = `Paused: ${currentArtist} - ${currentSong}`;
+                    updateControlButtons();
+                }
+            } catch (error) {
+                console.error('Error pausing music:', error);
+            }
+        }
+
+        // Stop music
+        async function stopMusic() {
+            try {
+                const response = await fetch('/stop');
+                if (response.ok) {
+                    isPlaying = false;
+                    nowPlaying.textContent = 'Not playing';
+                    currentSong = '';
+                    updateControlButtons();
+                }
+            } catch (error) {
+                console.error('Error stopping music:', error);
+            }
+        }
+
+        // Update button states
+        function updateControlButtons() {
+            if (currentSong && isPlaying) {
+                pauseBtn.disabled = false;
+                stopBtn.disabled = false;
+            } else if (currentSong && !isPlaying) {
+                pauseBtn.disabled = true;
+                stopBtn.disabled = false;
+            } else {
+                pauseBtn.disabled = true;
+                stopBtn.disabled = true;
+            }
+        }
+    </script>
+</body>
+</html>
+
