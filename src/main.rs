@@ -2,50 +2,141 @@ use axum::extract::{Path, State};
 use axum::{
     Json, Router,
     response::{Html, IntoResponse},
-    routing::get,
+    routing::{get, post},
 };
-use rodio::{Decoder, OutputStream, Sink};
+use rodio::{Decoder, OutputStream, Sink, Source};
+use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::BufReader;
-use std::sync::Arc;
+use std::sync::mpsc::Receiver;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::spawn_blocking;
 
 enum AudioCommand {
     Play(String),
+    PlayIndex(usize),
     Pause,
     Stop,
+    Next,
+    Previous,
+    GetCurrentTrack,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Song {
+    artist: String,
+    album: String,
+    title: String,
+    path: String,
+}
+
+// Queue status response
+#[derive(Debug, Serialize, Deserialize)]
+struct QueueStatus {
+    current_index: usize,
+    queue: Vec<Song>,
+    is_playing: bool,
+}
+
+// Application state with thread-safe queue
 struct AppState {
     audio_tx: mpsc::Sender<AudioCommand>,
+    song_queue: Arc<Mutex<Vec<Song>>>,
+    current_index: Arc<Mutex<usize>>,
+    is_playing: Arc<Mutex<bool>>,
 }
 
 #[tokio::main]
 async fn main() {
     let (audio_tx, audio_rx) = mpsc::channel::<AudioCommand>(32);
+    let song_queue = Arc::new(Mutex::new(Vec::new()));
+    let current_index = Arc::new(Mutex::new(0));
+    let is_playing = Arc::new(Mutex::new(false));
 
-    let app_state = Arc::new(AppState { audio_tx });
+    let app_state = Arc::new(AppState {
+        audio_tx,
+        song_queue,
+        current_index,
+        is_playing,
+    });
 
-    tokio::spawn(audio_player(audio_rx));
+    tokio::spawn(audio_player(
+        audio_rx,
+        Arc::clone(&app_state.song_queue),
+        Arc::clone(&app_state.current_index),
+        Arc::clone(&app_state.is_playing),
+    ));
 
     let app = Router::new()
         .route("/", get(serve_index))
         .route(
-            "/play/{artist}/{song}",
+            "/play/{artist}/{album}/{song}",
             get({
                 let shared_state = Arc::clone(&app_state);
-                move |path| play_song1(axum::extract::State(shared_state), path)
+                move |path| play_song(State(shared_state), path)
             }),
         )
-        .route("/stop", get(stop_music))
-        .route("/pause", get(pause_music))
+        .route(
+            "/add_to_queue/{artist}/{album}/{song}",
+            post({
+                let shared_state = Arc::clone(&app_state);
+                move |path| add_to_queue(State(shared_state), path)
+            }),
+        )
+        .route(
+            "/play_queue_index/{index}",
+            get({
+                let shared_state = Arc::clone(&app_state);
+                move |path| play_queue_index(State(shared_state), path)
+            }),
+        )
+        .route(
+            "/next",
+            get({
+                let shared_state = Arc::clone(&app_state);
+                move || next_song(State(shared_state))
+            }),
+        )
+        .route(
+            "/previous",
+            get({
+                let shared_state = Arc::clone(&app_state);
+                move || previous_song(State(shared_state))
+            }),
+        )
+        .route(
+            "/queue",
+            get({
+                let shared_state = Arc::clone(&app_state);
+                move || get_queue(State(shared_state))
+            }),
+        )
+        .route(
+            "/stop",
+            get({
+                let shared_state = Arc::clone(&app_state);
+                move || stop_music(State(shared_state))
+            }),
+        )
+        .route(
+            "/pause",
+            get({
+                let shared_state = Arc::clone(&app_state);
+                move || pause_music(State(shared_state))
+            }),
+        )
         .route("/get_library", get(get_library))
         .route("/{artist}", get(move |path| get_artist_dir(path)))
+        .route(
+            "/{artist}/{album}",
+            get(move |path| get_artist_albums(path)),
+        )
         .with_state(app_state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-
+    println!("Listening on http://localhost:3000");
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -55,11 +146,18 @@ async fn serve_index() -> Html<String> {
 
 async fn get_library() -> Json<Vec<String>> {
     let mut library: Vec<String> = vec![];
-    for entry in std::fs::read_dir("assets/music").unwrap() {
-        if let Ok(entry) = entry {
-            if let Some(filename) = entry.file_name().to_str() {
-                library.push(filename.to_owned());
+    match std::fs::read_dir("assets/music") {
+        Ok(entries) => {
+            for entry in entries {
+                if let Ok(entry) = entry {
+                    if let Some(filename) = entry.file_name().to_str() {
+                        library.push(filename.to_owned());
+                    }
+                }
             }
+        }
+        Err(e) => {
+            eprintln!("Error reading music library: {}", e);
         }
     }
     Json(library)
@@ -67,14 +165,45 @@ async fn get_library() -> Json<Vec<String>> {
 
 async fn get_artist_dir(Path(artist): Path<String>) -> Json<Vec<String>> {
     let mut artist_dir = vec![];
-    for entry in std::fs::read_dir(format!("assets/music/{}", artist)).unwrap() {
-        if let Ok(entry) = entry {
-            if let Some(filename) = entry.file_name().to_str() {
-                artist_dir.push(filename.to_owned())
+    match std::fs::read_dir(format!("assets/music/{}", artist)) {
+        Ok(entries) => {
+            for entry in entries {
+                if let Ok(entry) = entry {
+                    if let Some(filename) = entry.file_name().to_str() {
+                        artist_dir.push(filename.to_owned())
+                    }
+                }
             }
+        }
+        Err(e) => {
+            eprintln!("Error reading artist directory: {}", e);
         }
     }
     Json(artist_dir)
+}
+
+async fn get_artist_albums(Path((artist, album)): Path<(String, String)>) -> Json<Vec<String>> {
+    let mut artist_albums = vec![];
+    match std::fs::read_dir(format!("assets/music/{}/{}", artist, album)) {
+        Ok(entries) => {
+            for entry in entries {
+                if let Ok(entry) = entry {
+                    if let Some(filename) = entry.file_name().to_str() {
+                        if filename.ends_with(".flac")
+                            || filename.ends_with(".mp3")
+                            || filename.ends_with(".wav")
+                        {
+                            artist_albums.push(filename.to_owned())
+                        }
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("Error reading album directory: {}", e);
+        }
+    }
+    Json(artist_albums)
 }
 
 async fn stop_music(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -83,65 +212,158 @@ async fn stop_music(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         return Html::<String>("Error stopping music".into());
     }
 
+    // Update playing state
+    {
+        let mut is_playing = state.is_playing.lock().unwrap();
+        *is_playing = false;
+    }
+
     Html("Stopping Music".into())
 }
 
-async fn audio_player(mut rx: mpsc::Receiver<AudioCommand>) {
-    spawn_blocking(move || {
-        let (_stream, stream_handle) = match OutputStream::try_default() {
-            Ok(output) => output,
-            Err(e) => {
-                eprintln!("Failed to create audio output stream: {}", e);
-                return;
-            }
-        };
+async fn play_song(
+    State(state): State<Arc<AppState>>,
+    Path((artist, album, song)): Path<(String, String, String)>,
+) -> impl IntoResponse {
+    let path = format!("assets/music/{artist}/{album}/{song}");
 
-        let mut current_sink: Option<Sink> = None;
+    {
+        let mut queue = state.song_queue.lock().unwrap();
+        queue.push(Song {
+            artist: artist.clone(),
+            album: album.clone(),
+            title: song.clone(),
+            path: path.clone(),
+        });
 
-        while let Some(cmd) = rx.blocking_recv() {
-            match cmd {
-                AudioCommand::Play(path) => {
-                    println!("{}", path);
+        // Reset current index
+        let mut current_idx = state.current_index.lock().unwrap();
+        *current_idx = 0;
 
-                    if let Some(sink) = current_sink.take() {
-                        sink.stop();
-                    }
+        // Set playing state to true
+        let mut is_playing = state.is_playing.lock().unwrap();
+        *is_playing = true;
+    }
 
-                    match Sink::try_new(&stream_handle) {
-                        Ok(sink) => match File::open(&path) {
-                            Ok(file) => {
-                                let buf_reader = BufReader::new(file);
-                                match Decoder::new(buf_reader) {
-                                    Ok(source) => {
-                                        sink.append(source);
-                                        current_sink = Some(sink);
-                                        println!("Playing: {}", path);
-                                    }
-                                    Err(e) => eprintln!("Error decoding audio: {}", e),
-                                }
-                            }
-                            Err(e) => eprintln!("Error opening audio file: {}", e),
-                        },
-                        Err(e) => eprintln!("Error creating audio sink: {}", e),
-                    }
-                }
-                AudioCommand::Stop => {
-                    if let Some(sink) = current_sink.take() {
-                        println!("Stopping audio");
-                        sink.stop();
-                    }
-                }
-                AudioCommand::Pause => {
-                    if let Some(sink) = current_sink.take() {
-                        println!("Pausing Music");
-                        sink.pause();
-                    }
-                }
-            }
+    if let Err(e) = state.audio_tx.send(AudioCommand::Play(path)).await {
+        eprintln!("Failed to send play command: {}", e);
+        return Html::<String>("Error playing music".into());
+    }
+
+    Html(format!("Playing {song} by {artist}").into())
+}
+
+async fn add_to_queue(
+    State(state): State<Arc<AppState>>,
+    Path((artist, album, song)): Path<(String, String, String)>,
+) -> impl IntoResponse {
+    let path = format!("assets/music/{artist}/{album}/{song}");
+    let queue_was_empty;
+
+    // Add to queue
+    {
+        let mut queue = state.song_queue.lock().unwrap();
+        queue_was_empty = queue.is_empty();
+
+        queue.push(Song {
+            artist,
+            album,
+            title: song.clone(),
+            path: path.clone(),
+        });
+    }
+
+    // If the queue was empty, we should start playing this song immediately
+    if queue_was_empty {
+        // Start playing the first song
+        if let Err(e) = state.audio_tx.send(AudioCommand::Play(path)).await {
+            eprintln!("Failed to start playing first queued song: {}", e);
+            return Html::<String>(
+                format!("Added {song} to queue, but failed to start playback").into(),
+            );
         }
+    }
+
+    // Set playing state to true
+    {
+        let mut is_playing = state.is_playing.lock().unwrap();
+        *is_playing = true;
+    }
+
+    return Html(format!("Added {song} to queue and started playback").into());
+}
+
+async fn play_queue_index(
+    State(state): State<Arc<AppState>>,
+    Path(index): Path<usize>,
+) -> impl IntoResponse {
+    let song_title;
+
+    {
+        let queue = state.song_queue.lock().unwrap();
+        if index >= queue.len() {
+            return Html("Invalid queue index".into());
+        }
+
+        song_title = queue[index].title.clone();
+
+        // Update current index
+        let mut current_idx = state.current_index.lock().unwrap();
+        *current_idx = index;
+
+        // Set playing state to true
+        let mut is_playing = state.is_playing.lock().unwrap();
+        *is_playing = true;
+    }
+
+    if let Err(e) = state.audio_tx.send(AudioCommand::PlayIndex(index)).await {
+        eprintln!("Failed to send play index command: {}", e);
+        return Html::<String>("Error playing music from queue".into());
+    }
+
+    Html(format!("Playing '{}' from queue", song_title).into())
+}
+
+async fn next_song(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    if let Err(e) = state.audio_tx.send(AudioCommand::Next).await {
+        eprintln!("Failed to send next command: {}", e);
+        return Html::<String>("Error skipping to next song".into());
+    }
+
+    // Set playing state to true
+    {
+        let mut is_playing = state.is_playing.lock().unwrap();
+        *is_playing = true;
+    }
+
+    Html("Playing next song".into())
+}
+
+async fn previous_song(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    if let Err(e) = state.audio_tx.send(AudioCommand::Previous).await {
+        eprintln!("Failed to send previous command: {}", e);
+        return Html::<String>("Error going to previous song".into());
+    }
+
+    // Set playing state to true
+    {
+        let mut is_playing = state.is_playing.lock().unwrap();
+        *is_playing = true;
+    }
+
+    Html("Playing previous song".into())
+}
+
+async fn get_queue(State(state): State<Arc<AppState>>) -> Json<QueueStatus> {
+    let queue = state.song_queue.lock().unwrap().clone();
+    let current_index = *state.current_index.lock().unwrap();
+    let is_playing = *state.is_playing.lock().unwrap();
+
+    Json(QueueStatus {
+        current_index,
+        queue,
+        is_playing,
     })
-    .await
-    .unwrap();
 }
 
 async fn pause_music(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -150,21 +372,54 @@ async fn pause_music(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         return Html::<String>("Error pausing music".into());
     }
 
+    // Update playing state
+    {
+        let mut is_playing = state.is_playing.lock().unwrap();
+        *is_playing = false;
+    }
+
     Html("Pausing music".into())
 }
 
-async fn play_song1(
-    State(state): State<Arc<AppState>>,
-    Path((artist, song)): Path<(String, String)>,
-) -> impl IntoResponse {
-    if let Err(e) = state
-        .audio_tx
-        .send(AudioCommand::Play(format!("assets/music/{artist}/{song}")))
-        .await
-    {
-        eprintln!("Failed to send play command: {}", e);
-        return Html::<String>("Error playing music".into());
-    }
+async fn audio_player(
+    mut rx: mpsc::Receiver<AudioCommand>,
+    queue: Arc<Mutex<Vec<Song>>>,
+    current_index: Arc<Mutex<usize>>,
+    is_playing: Arc<Mutex<bool>>,
+) {
+    spawn_blocking(move || {
+        let (_stream, stream_handle) = OutputStream::try_default().unwrap();
+        let sink = Sink::try_new(&stream_handle).unwrap();
+        let current_index_clone = Arc::clone(&current_index);
 
-    Html("Playing song 1".into())
+        loop {
+            if let Ok(cmd) = rx.try_recv() {
+                match cmd {
+                    AudioCommand::Play(path) => {
+                        let file = BufReader::new(File::open(path).unwrap());
+                        let source = Decoder::new(file).unwrap(); // get source from path;
+                        sink.append(source);
+                        let callback_source =
+                            rodio::source::EmptyCallback::<f32>::new(Box::new(|| {
+                                // update queue
+                                *current_index_clone.lock().unwrap() += 1;
+
+                                println!("actual source has ended!")
+                            }));
+                        sink.append(callback_source);
+                        println!("{}", sink.len() - queue.lock().unwrap().len());
+                        // sink.sleep_until_end();
+                    }
+                    AudioCommand::Pause => {
+                        if sink.is_paused() {
+                            sink.play();
+                        } else {
+                            sink.pause();
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    });
 }
