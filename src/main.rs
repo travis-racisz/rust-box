@@ -21,6 +21,7 @@ enum AudioCommand {
     Stop,
     Next,
     Previous,
+    Increment,
     GetCurrentTrack,
 }
 
@@ -64,6 +65,7 @@ async fn main() {
 
     tokio::spawn(audio_player(
         audio_rx,
+        Arc::clone(&app_state),
         Arc::clone(&app_state.song_queue),
         Arc::clone(&app_state.current_index),
         Arc::clone(&app_state.is_playing),
@@ -381,8 +383,11 @@ async fn pause_music(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     Html("Pausing music".into())
 }
 
+fn increment_current_index() {}
+
 async fn audio_player(
     mut rx: mpsc::Receiver<AudioCommand>,
+    state: Arc<AppState>,
     queue: Arc<Mutex<Vec<Song>>>,
     current_index: Arc<Mutex<usize>>,
     is_playing: Arc<Mutex<bool>>,
@@ -390,7 +395,6 @@ async fn audio_player(
     spawn_blocking(move || {
         let (_stream, stream_handle) = OutputStream::try_default().unwrap();
         let sink = Sink::try_new(&stream_handle).unwrap();
-        let current_index_clone = Arc::clone(&current_index);
 
         loop {
             if let Ok(cmd) = rx.try_recv() {
@@ -399,16 +403,9 @@ async fn audio_player(
                         let file = BufReader::new(File::open(path).unwrap());
                         let source = Decoder::new(file).unwrap(); // get source from path;
                         sink.append(source);
-                        let callback_source =
-                            rodio::source::EmptyCallback::<f32>::new(Box::new(|| {
-                                // update queue
-                                *current_index_clone.lock().unwrap() += 1;
 
-                                println!("actual source has ended!")
-                            }));
-                        sink.append(callback_source);
-                        println!("{}", sink.len() - queue.lock().unwrap().len());
-                        // sink.sleep_until_end();
+                        sink.sleep_until_end();
+                        *current_index.lock().unwrap() += 1;
                     }
                     AudioCommand::Pause => {
                         if sink.is_paused() {
@@ -416,6 +413,9 @@ async fn audio_player(
                         } else {
                             sink.pause();
                         }
+                    }
+                    AudioCommand::Increment => {
+                        *current_index.lock().unwrap() += 1;
                     }
                     _ => {}
                 }
