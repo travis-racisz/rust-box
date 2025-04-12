@@ -413,7 +413,7 @@ async fn previous_song(State(state): State<Arc<AppState>>) -> impl IntoResponse 
 
 #[debug_handler]
 async fn get_queue(State(state): State<Arc<AppState>>) -> Json<QueueStatus> {
-    let queue = state.song_queue.lock().unwrap().clone();
+    let queue = state.song_queue.try_lock().unwrap().clone();
     let current_index = state.current_index.load(Ordering::Relaxed);
     let is_playing = *state.is_playing.lock().unwrap();
 
@@ -470,6 +470,24 @@ async fn audio_player(
                         } else {
                             sink.pause();
                         }
+                    }
+                    AudioCommand::Next => {
+                        sink.skip_one();
+                        queue.lock().unwrap().remove(0);
+                    }
+                    AudioCommand::Stop => {
+                        sink.stop();
+                        queue.lock().unwrap().clear();
+                        current_index.store(0, Ordering::Relaxed);
+                    }
+                    AudioCommand::PlayIndex(index) => {
+                        let mut i = 0;
+                        while i <= index {
+                            sink.skip_one();
+                            queue.lock().unwrap().remove(0);
+                            i += 1;
+                        }
+                        current_index.store(0, Ordering::Relaxed);
                     }
                     AudioCommand::Increment => {
                         current_index.fetch_add(1, Ordering::Relaxed);
