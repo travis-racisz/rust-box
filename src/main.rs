@@ -4,12 +4,15 @@ use axum::{
     response::{Html, IntoResponse},
     routing::{get, post},
 };
+use axum_macros::debug_handler;
 use rodio::{Decoder, OutputStream, Sink, Source};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::BufReader;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
+use std::thread::current;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::spawn_blocking;
@@ -36,7 +39,7 @@ struct Song {
 // Queue status response
 #[derive(Debug, Serialize, Deserialize)]
 struct QueueStatus {
-    current_index: usize,
+    current_index: u32,
     queue: Vec<Song>,
     is_playing: bool,
 }
@@ -45,7 +48,7 @@ struct QueueStatus {
 struct AppState {
     audio_tx: mpsc::Sender<AudioCommand>,
     song_queue: Arc<Mutex<Vec<Song>>>,
-    current_index: Arc<Mutex<usize>>,
+    current_index: Arc<AtomicU32>,
     is_playing: Arc<Mutex<bool>>,
 }
 
@@ -53,7 +56,7 @@ struct AppState {
 async fn main() {
     let (audio_tx, audio_rx) = mpsc::channel::<AudioCommand>(32);
     let song_queue = Arc::new(Mutex::new(Vec::new()));
-    let current_index = Arc::new(Mutex::new(0));
+    let current_index = Arc::new(AtomicU32::new(0));
     let is_playing = Arc::new(Mutex::new(false));
 
     let app_state = Arc::new(AppState {
@@ -239,8 +242,7 @@ async fn play_song(
         });
 
         // Reset current index
-        let mut current_idx = state.current_index.lock().unwrap();
-        *current_idx = 0;
+        state.current_index.store(0, Ordering::Relaxed);
 
         // Set playing state to true
         let mut is_playing = state.is_playing.lock().unwrap();
@@ -310,8 +312,8 @@ async fn play_queue_index(
         song_title = queue[index].title.clone();
 
         // Update current index
-        let mut current_idx = state.current_index.lock().unwrap();
-        *current_idx = index;
+        //TODO:
+        // state.current_index.store(u32(index), Ordering::Relaxed);
 
         // Set playing state to true
         let mut is_playing = state.is_playing.lock().unwrap();
@@ -356,9 +358,10 @@ async fn previous_song(State(state): State<Arc<AppState>>) -> impl IntoResponse 
     Html("Playing previous song".into())
 }
 
+#[debug_handler]
 async fn get_queue(State(state): State<Arc<AppState>>) -> Json<QueueStatus> {
     let queue = state.song_queue.lock().unwrap().clone();
-    let current_index = *state.current_index.lock().unwrap();
+    let current_index = state.current_index.load(Ordering::Relaxed);
     let is_playing = *state.is_playing.lock().unwrap();
 
     Json(QueueStatus {
@@ -389,23 +392,26 @@ async fn audio_player(
     mut rx: mpsc::Receiver<AudioCommand>,
     state: Arc<AppState>,
     queue: Arc<Mutex<Vec<Song>>>,
-    current_index: Arc<Mutex<usize>>,
+    current_index: Arc<AtomicU32>,
     is_playing: Arc<Mutex<bool>>,
 ) {
     spawn_blocking(move || {
         let (_stream, stream_handle) = OutputStream::try_default().unwrap();
         let sink = Sink::try_new(&stream_handle).unwrap();
-
         loop {
             if let Ok(cmd) = rx.try_recv() {
                 match cmd {
                     AudioCommand::Play(path) => {
                         let file = BufReader::new(File::open(path).unwrap());
-                        let source = Decoder::new(file).unwrap(); // get source from path;
+                        let source = Decoder::new(file).unwrap();
                         sink.append(source);
 
-                        sink.sleep_until_end();
-                        *current_index.lock().unwrap() += 1;
+                        let idx_clone = current_index.clone();
+                        sink.append(rodio::source::EmptyCallback::<f32>::new(Box::new(
+                            move || {
+                                idx_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            },
+                        )));
                     }
                     AudioCommand::Pause => {
                         if sink.is_paused() {
@@ -415,7 +421,7 @@ async fn audio_player(
                         }
                     }
                     AudioCommand::Increment => {
-                        *current_index.lock().unwrap() += 1;
+                        current_index.fetch_add(1, Ordering::Relaxed);
                     }
                     _ => {}
                 }

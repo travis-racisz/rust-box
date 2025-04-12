@@ -2,6 +2,7 @@
 <html>
 <head>
     <title>Rust Music Player</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/css/all.min.css">
     <style>
         /* Catppuccin Mocha Theme Colors */
@@ -78,6 +79,7 @@
             border-radius: 12px;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
             margin-bottom: 20px;
+            justify-content: center;
         }
 
         .control-button {
@@ -329,6 +331,145 @@
         .empty-state-text {
             font-size: 0.9rem;
         }
+
+        /* Media Queries */
+        @media screen and (max-width: 1024px) {
+            .app-container {
+                padding: 16px;
+            }
+            
+            .library-container, .queue-container {
+                height: calc(100vh - 180px);
+            }
+        }
+        
+        @media screen and (max-width: 768px) {
+            .app-title {
+                font-size: 1.5rem;
+            }
+            
+            .main-content {
+                grid-template-columns: 1fr;
+                gap: 16px;
+            }
+            
+            .library-container, .queue-container {
+                height: auto;
+                max-height: 400px;
+            }
+            
+            .now-playing {
+                padding: 12px;
+            }
+            
+            .player-controls {
+                padding: 12px;
+            }
+            
+            .control-button {
+                width: 36px;
+                height: 36px;
+            }
+            
+            .control-button.play {
+                width: 42px;
+                height: 42px;
+            }
+        }
+        
+        @media screen and (max-width: 480px) {
+            .app-container {
+                padding: 12px;
+            }
+            
+            .app-title {
+                font-size: 1.25rem;
+            }
+            
+            .player-controls {
+                gap: 8px;
+                padding: 10px;
+            }
+            
+            .control-button {
+                width: 32px;
+                height: 32px;
+            }
+            
+            .control-button.play {
+                width: 38px;
+                height: 38px;
+            }
+            
+            .list-item {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .list-item-controls {
+                margin-top: 8px;
+                width: 100%;
+                justify-content: flex-end;
+            }
+            
+            .now-playing-cover {
+                width: 48px;
+                height: 48px;
+            }
+            
+            .now-playing-cover i {
+                font-size: 18px;
+            }
+            
+            .now-playing-title {
+                font-size: 0.9rem;
+            }
+            
+            .now-playing-artist {
+                font-size: 0.8rem;
+            }
+            
+            .queue-item {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .queue-item-controls {
+                margin-top: 8px;
+                width: 100%;
+                justify-content: flex-end;
+            }
+            
+            .breadcrumb {
+                flex-wrap: wrap;
+            }
+        }
+        
+        /* For very small screens */
+        @media screen and (max-width: 320px) {
+            .app-title {
+                font-size: 1.1rem;
+            }
+            
+            .container-title {
+                font-size: 1rem;
+            }
+            
+            .control-button {
+                width: 28px;
+                height: 28px;
+            }
+            
+            .control-button.play {
+                width: 34px;
+                height: 34px;
+            }
+            
+            .item-button {
+                padding: 4px 8px;
+                font-size: 0.7rem;
+            }
+        }
     </style>
 </head>
 <body>
@@ -396,11 +537,8 @@
             document.getElementById('next-button').addEventListener('click', nextSong);
             document.getElementById('previous-button').addEventListener('click', previousSong);
             
-            // Set up home link event listener
-            document.getElementById('home-link').addEventListener('click', function(e) {
-                e.preventDefault();
-                loadLibrary();
-            });
+            // No need to set up home link event listener here - it's handled in updateBreadcrumb
+            // which gets called by loadLibrary
             
             // Initial library load
             loadLibrary();
@@ -488,16 +626,32 @@
         
         // Load the music library
         function loadLibrary() {
+            // Clear current navigation state
             currentArtist = null;
             currentAlbum = null;
+            
+            // Update breadcrumb first
             updateBreadcrumb();
             
+            // Add a loading indicator
+            const libraryContent = document.getElementById('library-content');
+            libraryContent.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <div class="empty-state-text">Loading library...</div>
+                </div>
+            `;
+            
+            // Fetch library data with error handling
             fetch('/get_library')
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
                 .then(artists => {
-                    const libraryContent = document.getElementById('library-content');
-                    
-                    if (artists.length === 0) {
+                    if (!Array.isArray(artists) || artists.length === 0) {
                         libraryContent.innerHTML = `
                             <div class="empty-state">
                                 <i class="fas fa-music"></i>
@@ -507,8 +661,9 @@
                         return;
                     }
                     
-                    libraryContent.innerHTML = '<ul class="list-container"></ul>';
-                    const artistList = libraryContent.querySelector('.list-container');
+                    // Create artist list
+                    const ul = document.createElement('ul');
+                    ul.className = 'list-container';
                     
                     artists.forEach(artist => {
                         const li = document.createElement('li');
@@ -519,24 +674,63 @@
                         content.textContent = artist;
                         
                         li.appendChild(content);
-                        li.addEventListener('click', () => loadArtist(artist));
-                        artistList.appendChild(li);
+                        
+                        // Add click event directly to the list item
+                        li.addEventListener('click', function() {
+                            loadArtist(artist);
+                        });
+                        
+                        ul.appendChild(li);
                     });
+                    
+                    // Clear and append the new content
+                    libraryContent.innerHTML = '';
+                    libraryContent.appendChild(ul);
+                })
+                .catch(error => {
+                    console.error('Error loading library:', error);
+                    libraryContent.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <div class="empty-state-text">Error loading library. Please try again.</div>
+                        </div>
+                    `;
                 });
         }
         
         // Load artist albums
         function loadArtist(artist) {
+            if (!artist) {
+                console.error('Artist name is missing');
+                return;
+            }
+            
+            // Update navigation state
             currentArtist = artist;
             currentAlbum = null;
+            
+            // Update breadcrumb
             updateBreadcrumb();
             
+            // Add loading indicator
+            const libraryContent = document.getElementById('library-content');
+            libraryContent.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <div class="empty-state-text">Loading albums for ${artist}...</div>
+                </div>
+            `;
+            
+            // Fetch artist albums with error handling
             fetch(`/${encodeURIComponent(artist)}`)
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
                 .then(albums => {
-                    const libraryContent = document.getElementById('library-content');
-                    
-                    if (albums.length === 0) {
+                    if (!Array.isArray(albums) || albums.length === 0) {
                         libraryContent.innerHTML = `
                             <div class="empty-state">
                                 <i class="fas fa-compact-disc"></i>
@@ -546,8 +740,9 @@
                         return;
                     }
                     
-                    libraryContent.innerHTML = '<ul class="list-container"></ul>';
-                    const albumList = libraryContent.querySelector('.list-container');
+                    // Create album list
+                    const ul = document.createElement('ul');
+                    ul.className = 'list-container';
                     
                     albums.forEach(album => {
                         const li = document.createElement('li');
@@ -558,24 +753,63 @@
                         content.textContent = album;
                         
                         li.appendChild(content);
-                        li.addEventListener('click', () => loadAlbum(artist, album));
-                        albumList.appendChild(li);
+                        
+                        // Add click event directly to the list item
+                        li.addEventListener('click', function() {
+                            loadAlbum(artist, album);
+                        });
+                        
+                        ul.appendChild(li);
                     });
+                    
+                    // Clear and append the new content
+                    libraryContent.innerHTML = '';
+                    libraryContent.appendChild(ul);
+                })
+                .catch(error => {
+                    console.error('Error loading albums:', error);
+                    libraryContent.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <div class="empty-state-text">Error loading albums for ${artist}. Please try again.</div>
+                        </div>
+                    `;
                 });
         }
         
         // Load album songs
         function loadAlbum(artist, album) {
+            if (!artist || !album) {
+                console.error('Artist or album name is missing');
+                return;
+            }
+            
+            // Update navigation state
             currentArtist = artist;
             currentAlbum = album;
+            
+            // Update breadcrumb
             updateBreadcrumb();
             
+            // Add loading indicator
+            const libraryContent = document.getElementById('library-content');
+            libraryContent.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <div class="empty-state-text">Loading songs from ${album}...</div>
+                </div>
+            `;
+            
+            // Fetch album songs with error handling
             fetch(`/${encodeURIComponent(artist)}/${encodeURIComponent(album)}`)
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
                 .then(songs => {
-                    const libraryContent = document.getElementById('library-content');
-                    
-                    if (songs.length === 0) {
+                    if (!Array.isArray(songs) || songs.length === 0) {
                         libraryContent.innerHTML = `
                             <div class="empty-state">
                                 <i class="fas fa-file-audio"></i>
@@ -585,8 +819,9 @@
                         return;
                     }
                     
-                    libraryContent.innerHTML = '<ul class="list-container"></ul>';
-                    const songList = libraryContent.querySelector('.list-container');
+                    // Create song list
+                    const ul = document.createElement('ul');
+                    ul.className = 'list-container';
                     
                     songs.forEach(song => {
                         const li = document.createElement('li');
@@ -602,33 +837,71 @@
                         const playButton = document.createElement('button');
                         playButton.className = 'item-button play';
                         playButton.innerHTML = '<i class="fas fa-play"></i> Play';
-                        playButton.addEventListener('click', (e) => {
+                        
+                        // Use function declaration for consistency
+                        playButton.addEventListener('click', function(e) {
                             e.stopPropagation();
                             playSong(artist, album, song);
-                        });
-                        
-                        const queueButton = document.createElement('button');
-                        queueButton.className = 'item-button';
-                        queueButton.innerHTML = '<i class="fas fa-plus"></i> Queue';
-                        queueButton.addEventListener('click', (e) => {
-                            e.stopPropagation();
-                            addToQueue(artist, album, song);
+                            
+                            // Show notification (moved from addToQueue)
+                            const notification = document.createElement('div');
+                            notification.style.position = 'fixed';
+                            notification.style.bottom = '20px';
+                            notification.style.right = '20px';
+                            notification.style.backgroundColor = 'var(--green)';
+                            notification.style.color = 'var(--base)';
+                            notification.style.padding = '10px 16px';
+                            notification.style.borderRadius = '8px';
+                            notification.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
+                            notification.style.zIndex = '1000';
+                            notification.innerHTML = `<i class="fas fa-play"></i> Now playing: ${song}`;
+                            
+                            document.body.appendChild(notification);
+                            setTimeout(() => {
+                                notification.style.opacity = '0';
+                                notification.style.transition = 'opacity 0.5s ease';
+                                setTimeout(() => {
+                                    document.body.removeChild(notification);
+                                }, 500);
+                            }, 2000);
                         });
                         
                         controls.appendChild(playButton);
-                        controls.appendChild(queueButton);
                         li.appendChild(content);
                         li.appendChild(controls);
                         
-                        songList.appendChild(li);
+                        ul.appendChild(li);
                     });
+                    
+                    // Clear and append the new content
+                    libraryContent.innerHTML = '';
+                    libraryContent.appendChild(ul);
+                })
+                .catch(error => {
+                    console.error('Error loading songs:', error);
+                    libraryContent.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <div class="empty-state-text">Error loading songs from ${album}. Please try again.</div>
+                        </div>
+                    `;
                 });
         }
         
         // Play a song immediately
         function playSong(artist, album, song) {
+            // Show loading in the now playing area
+            updateNowPlaying({
+                title: `Loading: ${song}`,
+                artist: artist,
+                album: album
+            });
+            
             fetch(`/play/${encodeURIComponent(artist)}/${encodeURIComponent(album)}/${encodeURIComponent(song)}`)
-                .then(() => {
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Failed to play song');
+                    }
                     isPlaying = true;
                     updatePlayPauseButton();
                     updateNowPlaying({
@@ -637,41 +910,22 @@
                         album: album
                     });
                     setTimeout(loadQueue, 500);
+                })
+                .catch(error => {
+                    console.error('Error playing song:', error);
+                    // Show error in now playing
+                    updateNowPlaying({
+                        title: 'Error playing song',
+                        artist: 'Please try again',
+                        album: ''
+                    });
                 });
         }
         
-        // Add a song to the queue
+        // Function removed since we're no longer using the Queue button
+        // Keeping the function name and basic structure in case it's called elsewhere
         function addToQueue(artist, album, song) {
-            const options = {
-                method: 'POST'
-            };
-            
-            fetch(`/add_to_queue/${encodeURIComponent(artist)}/${encodeURIComponent(album)}/${encodeURIComponent(song)}`, options)
-                .then(response => {
-                    // Show a quick notification
-                    const notification = document.createElement('div');
-                    notification.style.position = 'fixed';
-                    notification.style.bottom = '20px';
-                    notification.style.right = '20px';
-                    notification.style.backgroundColor = 'var(--green)';
-                    notification.style.color = 'var(--base)';
-                    notification.style.padding = '10px 16px';
-                    notification.style.borderRadius = '8px';
-                    notification.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
-                    notification.style.zIndex = '1000';
-                    notification.innerHTML = `<i class="fas fa-plus"></i> Added to queue: ${song}`;
-                    
-                    document.body.appendChild(notification);
-                    setTimeout(() => {
-                        notification.style.opacity = '0';
-                        notification.style.transition = 'opacity 0.5s ease';
-                        setTimeout(() => {
-                            document.body.removeChild(notification);
-                        }, 500);
-                    }, 2000);
-                    
-                    setTimeout(loadQueue, 500);
-                });
+            console.log('addToQueue functionality has been removed');
         }
         
         // Play a specific song in the queue
@@ -753,30 +1007,59 @@
         // Update breadcrumb navigation
         function updateBreadcrumb() {
             const breadcrumb = document.getElementById('breadcrumb');
-            breadcrumb.innerHTML = '<a href="#" id="home-link">Home</a>';
             
-            // Re-add event listener
-            document.getElementById('home-link').addEventListener('click', (e) => {
+            // Create elements properly instead of using innerHTML
+            // This helps prevent event listener issues
+            breadcrumb.innerHTML = '';
+            
+            // Home link
+            const homeLink = document.createElement('a');
+            homeLink.href = "#";
+            homeLink.id = "home-link";
+            homeLink.textContent = "Home";
+            homeLink.addEventListener('click', function(e) {
                 e.preventDefault();
                 loadLibrary();
             });
+            breadcrumb.appendChild(homeLink);
             
+            // Add artist link if we have one
             if (currentArtist) {
-                breadcrumb.innerHTML += `<span class="breadcrumb-separator">/</span><a href="#" id="artist-link">${currentArtist}</a>`;
-                document.getElementById('artist-link').addEventListener('click', (e) => {
+                const separator = document.createElement('span');
+                separator.className = "breadcrumb-separator";
+                separator.textContent = "/";
+                breadcrumb.appendChild(separator);
+                
+                const artistLink = document.createElement('a');
+                artistLink.href = "#";
+                artistLink.id = "artist-link";
+                artistLink.textContent = currentArtist;
+                artistLink.addEventListener('click', function(e) {
                     e.preventDefault();
                     loadArtist(currentArtist);
                 });
+                breadcrumb.appendChild(artistLink);
             }
             
+            // Add album link if we have one
             if (currentAlbum) {
-                breadcrumb.innerHTML += `<span class="breadcrumb-separator">/</span><a href="#" id="album-link">${currentAlbum}</a>`;
-                document.getElementById('album-link').addEventListener('click', (e) => {
+                const separator = document.createElement('span');
+                separator.className = "breadcrumb-separator";
+                separator.textContent = "/";
+                breadcrumb.appendChild(separator);
+                
+                const albumLink = document.createElement('a');
+                albumLink.href = "#";
+                albumLink.id = "album-link";
+                albumLink.textContent = currentAlbum;
+                albumLink.addEventListener('click', function(e) {
                     e.preventDefault();
                     loadAlbum(currentArtist, currentAlbum);
                 });
+                breadcrumb.appendChild(albumLink);
             }
         }
     </script>
 </body>
 </html>
+
