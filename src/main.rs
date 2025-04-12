@@ -5,17 +5,15 @@ use axum::{
     routing::{get, post},
 };
 use axum_macros::debug_handler;
-use rodio::{Decoder, OutputStream, Sink, Source};
+use rodio::{Decoder, OutputStream, Sink};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
-use std::thread::current;
-use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::spawn_blocking;
+use tower_http::services::ServeDir;
 
 enum AudioCommand {
     Play(String),
@@ -34,6 +32,13 @@ struct Song {
     album: String,
     title: String,
     path: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Album {
+    artist: String,
+    title: String,
+    cover_art_path: String,
 }
 
 // Queue status response
@@ -76,6 +81,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/", get(serve_index))
+        //.route_service("/music", ServeDir::new("assets/music"))
         .route(
             "/play/{artist}/{album}/{song}",
             get({
@@ -138,6 +144,7 @@ async fn main() {
             "/{artist}/{album}",
             get(move |path| get_artist_albums(path)),
         )
+        .nest_service("/assets", ServeDir::new("assets"))
         .with_state(app_state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
@@ -168,14 +175,37 @@ async fn get_library() -> Json<Vec<String>> {
     Json(library)
 }
 
-async fn get_artist_dir(Path(artist): Path<String>) -> Json<Vec<String>> {
-    let mut artist_dir = vec![];
+async fn get_artist_dir(Path(artist): Path<String>) -> Json<Vec<Album>> {
+    let mut artist_albums = vec![];
     match std::fs::read_dir(format!("assets/music/{}", artist)) {
         Ok(entries) => {
             for entry in entries {
                 if let Ok(entry) = entry {
-                    if let Some(filename) = entry.file_name().to_str() {
-                        artist_dir.push(filename.to_owned())
+                    if let Some(album_name) = entry.file_name().to_str() {
+                        // Find cover art in the album directory
+                        let mut cover_art_path = String::new();
+                        if let Ok(album_entries) =
+                            std::fs::read_dir(format!("assets/music/{}/{}", artist, album_name))
+                        {
+                            for album_entry in album_entries {
+                                if let Ok(album_entry) = album_entry {
+                                    if let Some(filename) = album_entry.file_name().to_str() {
+                                        if filename.ends_with(".jpg") || filename.ends_with(".png")
+                                        {
+                                            cover_art_path = filename.to_owned();
+                                            break; // Use the first image file found
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Add album to list
+                        artist_albums.push(Album {
+                            artist: artist.clone(),
+                            title: album_name.to_owned(),
+                            cover_art_path,
+                        });
                     }
                 }
             }
@@ -184,21 +214,44 @@ async fn get_artist_dir(Path(artist): Path<String>) -> Json<Vec<String>> {
             eprintln!("Error reading artist directory: {}", e);
         }
     }
-    Json(artist_dir)
+    Json(artist_albums)
 }
 
-async fn get_artist_albums(Path((artist, album)): Path<(String, String)>) -> Json<Vec<String>> {
+#[debug_handler]
+async fn get_artist_albums(Path((artist, album)): Path<(String, String)>) -> Json<Vec<Album>> {
     let mut artist_albums = vec![];
+    let mut cover = "".to_owned();
+
+    // First, try to find any cover art in the album directory
     match std::fs::read_dir(format!("assets/music/{}/{}", artist, album)) {
         Ok(entries) => {
+            // First pass - look for cover art
             for entry in entries {
                 if let Ok(entry) = entry {
                     if let Some(filename) = entry.file_name().to_str() {
-                        if filename.ends_with(".flac")
-                            || filename.ends_with(".mp3")
-                            || filename.ends_with(".wav")
-                        {
-                            artist_albums.push(filename.to_owned())
+                        if filename.ends_with(".jpg") || filename.ends_with(".png") {
+                            cover = filename.to_owned();
+                            break; // Use the first image file found
+                        }
+                    }
+                }
+            }
+
+            // Second pass - process song files
+            if let Ok(entries) = std::fs::read_dir(format!("assets/music/{}/{}", artist, album)) {
+                for entry in entries {
+                    if let Ok(entry) = entry {
+                        if let Some(filename) = entry.file_name().to_str() {
+                            if filename.ends_with(".flac")
+                                || filename.ends_with(".mp3")
+                                || filename.ends_with(".wav")
+                            {
+                                artist_albums.push(Album {
+                                    artist: artist.clone(),
+                                    title: filename.to_owned(),
+                                    cover_art_path: cover.clone(),
+                                });
+                            }
                         }
                     }
                 }
@@ -208,6 +261,7 @@ async fn get_artist_albums(Path((artist, album)): Path<(String, String)>) -> Jso
             eprintln!("Error reading album directory: {}", e);
         }
     }
+
     Json(artist_albums)
 }
 
@@ -312,8 +366,7 @@ async fn play_queue_index(
         song_title = queue[index].title.clone();
 
         // Update current index
-        //TODO:
-        // state.current_index.store(u32(index), Ordering::Relaxed);
+        // state.current_index.store(index, Ordering::Relaxed);
 
         // Set playing state to true
         let mut is_playing = state.is_playing.lock().unwrap();
@@ -385,8 +438,6 @@ async fn pause_music(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 
     Html("Pausing music".into())
 }
-
-fn increment_current_index() {}
 
 async fn audio_player(
     mut rx: mpsc::Receiver<AudioCommand>,

@@ -476,6 +476,7 @@
     <div class="app-container">
         <header class="app-header">
             <h1 class="app-title">Catppuccin Music Player</h1>
+            
         </header>
 
         <div class="now-playing" id="now-playing">
@@ -706,7 +707,7 @@
             }
             
             // Update navigation state
-            currentArtist = artist;
+            currentArtist = artist.artist;
             currentAlbum = null;
             
             // Update breadcrumb
@@ -734,7 +735,7 @@
                         libraryContent.innerHTML = `
                             <div class="empty-state">
                                 <i class="fas fa-compact-disc"></i>
-                                <div class="empty-state-text">No albums found for ${artist}</div>
+                                <div class="empty-state-text">No albums found for ${artist.artist}</div>
                             </div>
                         `;
                         return;
@@ -745,18 +746,28 @@
                     ul.className = 'list-container';
                     
                     albums.forEach(album => {
+                        console.log(album)
+                        const ca = document.createElement('img')
+                ca.src = `../assets/music/${artist}/${album.title}/${album.cover_art_path}`
+                          ca.style.width = "48px";
+                         ca.style.height = "48px";
+                         ca.style.objectFit = "cover";
+                         ca.style.borderRadius = "8px";
+                         ca.style.marginRight = "12px";
+
                         const li = document.createElement('li');
                         li.className = 'list-item';
                         
                         const content = document.createElement('div');
                         content.className = 'list-item-content';
-                        content.textContent = album;
+                        content.textContent = album.title;
                         
                         li.appendChild(content);
+                        li.appendChild(ca);
                         
                         // Add click event directly to the list item
                         li.addEventListener('click', function() {
-                            loadAlbum(artist, album);
+                            loadAlbum(artist, album.title);
                         });
                         
                         ul.appendChild(li);
@@ -824,12 +835,21 @@
                     ul.className = 'list-container';
                     
                     songs.forEach(song => {
+                // add cover art in song.cover_art_path
+                        const ca = document.createElement('img')
+                ca.src = `../assets/music/${artist}/${album}/${song.cover_art_path}`
+                          ca.style.width = "48px";
+                         ca.style.height = "48px";
+                         ca.style.objectFit = "cover";
+                         ca.style.borderRadius = "8px";
+                         ca.style.marginRight = "12px";
+                        console.log(ca.src)
                         const li = document.createElement('li');
                         li.className = 'list-item';
                         
                         const content = document.createElement('div');
                         content.className = 'list-item-content';
-                        content.textContent = song;
+                        content.textContent = song.title;
                         
                         const controls = document.createElement('div');
                         controls.className = 'list-item-controls';
@@ -854,7 +874,7 @@
                             notification.style.borderRadius = '8px';
                             notification.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
                             notification.style.zIndex = '1000';
-                            notification.innerHTML = `<i class="fas fa-play"></i> Now playing: ${song}`;
+                            notification.innerHTML = `<i class="fas fa-play"></i> Now playing: ${song.title}`;
                             
                             document.body.appendChild(notification);
                             setTimeout(() => {
@@ -867,6 +887,7 @@
                         });
                         
                         controls.appendChild(playButton);
+                        li.appendChild(ca);
                         li.appendChild(content);
                         li.appendChild(controls);
                         
@@ -885,19 +906,20 @@
                             <div class="empty-state-text">Error loading songs from ${album}. Please try again.</div>
                         </div>
                     `;
-                });
+                })
+          
         }
         
         // Play a song immediately
         function playSong(artist, album, song) {
             // Show loading in the now playing area
             updateNowPlaying({
-                title: `Loading: ${song}`,
+                title: `Loading: ${song.title}`,
                 artist: artist,
                 album: album
             });
             
-            fetch(`/play/${encodeURIComponent(artist)}/${encodeURIComponent(album)}/${encodeURIComponent(song)}`)
+            fetch(`/play/${encodeURIComponent(artist)}/${encodeURIComponent(album)}/${encodeURIComponent(song.title)}`)
                 .then(response => {
                     if (!response.ok) {
                         throw new Error('Failed to play song');
@@ -905,7 +927,7 @@
                     isPlaying = true;
                     updatePlayPauseButton();
                     updateNowPlaying({
-                        title: song,
+                        title: song.title,
                         artist: artist,
                         album: album
                     });
@@ -926,6 +948,7 @@
         // Keeping the function name and basic structure in case it's called elsewhere
         function addToQueue(artist, album, song) {
             console.log('addToQueue functionality has been removed');
+        
         }
         
         // Play a specific song in the queue
