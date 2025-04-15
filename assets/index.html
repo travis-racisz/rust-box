@@ -1,500 +1,827 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Rust Music Player</title>
+  <title>Rust Music Player</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/css/all.min.css">
     <style>
-        /* Catppuccin Mocha Theme Colors */
-        :root {
-            --rosewater: #f5e0dc;
-            --flamingo: #f2cdcd;
-            --pink: #f5c2e7;
-            --mauve: #cba6f7;
-            --red: #f38ba8;
-            --maroon: #eba0ac;
-            --peach: #fab387;
-            --yellow: #f9e2af;
-            --green: #a6e3a1;
-            --teal: #94e2d5;
-            --sky: #89dceb;
-            --sapphire: #74c7ec;
-            --blue: #89b4fa;
-            --lavender: #b4befe;
-            --text: #cdd6f4;
-            --subtext1: #bac2de;
-            --subtext0: #a6adc8;
-            --overlay2: #9399b2;
-            --overlay1: #7f849c;
-            --overlay0: #6c7086;
-            --surface2: #585b70;
-            --surface1: #45475a;
-            --surface0: #313244;
-            --base: #1e1e2e;
-            --mantle: #181825;
-            --crust: #11111b;
-        }
+      /* Modern Glass UI Theme */
+:root {
+    --bg-primary: rgba(25, 25, 30, 0.7);
+    --bg-secondary: rgba(35, 35, 40, 0.6);
+    --bg-tertiary: rgba(45, 45, 55, 0.45);
+    --text-primary: rgba(255, 255, 255, 0.95);
+    --text-secondary: rgba(255, 255, 255, 0.7);
+    --text-tertiary: rgba(255, 255, 255, 0.5);
+    --accent-primary: rgba(99, 178, 255, 0.9);
+    --accent-secondary: rgba(88, 120, 255, 0.85);
+    --accent-hover: rgba(120, 190, 255, 1);
+    --play-button: rgba(88, 200, 160, 0.85);
+    --play-button-hover: rgba(100, 220, 170, 1);
+    --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    --glass-border: 1px solid rgba(255, 255, 255, 0.1);
+    --divider: rgba(255, 255, 255, 0.08);
+    --now-playing-bg: rgba(60, 60, 70, 0.4);
+    --error: rgba(255, 90, 90, 0.85);
+    --warning: rgba(255, 180, 60, 0.85);
+    --success: rgba(90, 210, 120, 0.85);
+}
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-        }
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'SF Pro Display', 'SF Pro', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+}
 
-        body {
-            background-color: var(--base);
-            color: var(--text);
-            margin: 0;
-            padding: 0;
-            transition: all 0.3s ease;
-        }
+body {
+    background: linear-gradient(135deg, #202040 0%, #30304d 50%, #202040 100%);
+    background-attachment: fixed;
+    color: var(--text-primary);
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(200px);
+    overflow-x: hidden;
+}
 
-        .app-container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }
+.app-container {
+    max-width: 1300px;
+    margin: 0 auto;
+    padding: 20px;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
 
-        .app-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 20px 0;
-            border-bottom: 1px solid var(--surface0);
-            margin-bottom: 20px;
-        }
+.app-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 0;
+    margin-bottom: 24px;
+    border-bottom: var(--glass-border);
+}
 
-        .app-title {
-            color: var(--lavender);
-            font-size: 2rem;
-            font-weight: 700;
-        }
+.app-title {
+    color: var(--text-primary);
+    font-size: 1.8rem;
+    font-weight: 500;
+    letter-spacing: -0.5px;
+    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
 
-        .connection-status {
-            font-size: 0.8rem;
-            padding: 4px 8px;
-            border-radius: 4px;
-            display: inline-block;
-            margin-left: 10px;
-            transition: all 0.3s ease;
-        }
+.connection-status {
+    font-size: 0.8rem;
+    padding: 6px 12px;
+    border-radius: 20px;
+    display: inline-flex;
+    align-items: center;
+    margin-left: 10px;
+    transition: all 0.3s ease;
+    font-weight: 500;
+    backdrop-filter: blur(10px);
+}
 
-        .connection-status.connected {
-            background-color: var(--green);
-            color: var(--base);
-        }
+.connection-status::before {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 8px;
+}
 
-        .connection-status.disconnected {
-            background-color: var(--red);
-            color: var(--text);
-        }
+.connection-status.connected {
+    background-color: rgba(70, 200, 120, 0.2);
+    color: var(--success);
+}
 
-        .connection-status.connecting {
-            background-color: var(--yellow);
-            color: var(--base);
-        }
+.connection-status.connected::before {
+    background-color: var(--success);
+}
 
-        .player-controls {
-            display: flex;
-            gap: 12px;
-            padding: 16px;
-            background-color: var(--surface0);
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            margin-bottom: 20px;
-            justify-content: center;
-        }
+.connection-status.disconnected {
+    background-color: rgba(255, 90, 90, 0.2);
+    color: var(--error);
+}
 
-        .control-button {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background-color: var(--surface1);
-            color: var(--text);
-            border: none;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
+.connection-status.disconnected::before {
+    background-color: var(--error);
+}
 
-        .control-button:hover {
-            background-color: var(--surface2);
-            color: var(--lavender);
-        }
+.connection-status.connecting {
+    background-color: rgba(255, 180, 60, 0.2);
+    color: var(--warning);
+}
 
-        .control-button.play {
-            background-color: var(--mauve);
-            color: var(--base);
-            width: 48px;
-            height: 48px;
-        }
+.connection-status.connecting::before {
+    background-color: var(--warning);
+    animation: pulse 1s infinite;
+}
 
-        .control-button.play:hover {
-            background-color: var(--lavender);
-        }
+@keyframes pulse {
+    0% {
+        opacity: 0.4;
+    }
+    50% {
+        opacity: 1;
+    }
+    100% {
+        opacity: 0.4;
+    }
+}
 
-        .main-content {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-        }
+.now-playing {
+    margin-bottom: 24px;
+    padding: 20px;
+    background: var(--bg-tertiary);
+    backdrop-filter: blur(20px);
+    border-radius: 16px;
+    box-shadow: var(--glass-shadow);
+    border: var(--glass-border);
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    transition: all 0.3s ease;
+}
 
-        .library-container, .queue-container {
-            background-color: var(--mantle);
-            border-radius: 12px;
-            padding: 16px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            height: calc(100vh - 200px);
-            overflow-y: auto;
-        }
+.now-playing-cover {
+    width: 80px;
+    height: 80px;
+    background: var(--bg-secondary);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 10px 15px -5px rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
 
-        .container-title {
-            color: var(--lavender);
-            margin-bottom: 16px;
-            padding-bottom: 8px;
-            border-bottom: 1px solid var(--surface0);
-            font-size: 1.25rem;
-        }
+.now-playing-cover::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0) 100%);
+    pointer-events: none;
+}
 
-        .breadcrumb {
-            margin-bottom: 16px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            color: var(--subtext0);
-        }
+.now-playing-cover i {
+    font-size: 28px;
+    color: var(--text-secondary);
+}
 
-        .breadcrumb a {
-            color: var(--blue);
-            text-decoration: none;
-            transition: color 0.2s ease;
-        }
+.now-playing-info {
+    flex: 1;
+}
 
-        .breadcrumb a:hover {
-            color: var(--lavender);
-            text-decoration: underline;
-        }
+.now-playing-title {
+    font-weight: 600;
+    font-size: 1.3rem;
+    margin-bottom: 6px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 
-        .breadcrumb-separator {
-            color: var(--overlay0);
-        }
+.now-playing-artist {
+    font-size: 1rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 
-        /* List styles */
-        .list-container {
-            list-style-type: none;
-        }
+.player-controls {
+    display: flex;
+    gap: 16px;
+    padding: 20px;
+    background: var(--bg-tertiary);
+    backdrop-filter: blur(20px);
+    border-radius: 16px;
+    box-shadow: var(--glass-shadow);
+    border: var(--glass-border);
+    margin-bottom: 24px;
+    justify-content: center;
+    align-items: center;
+}
 
-        .list-item {
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 8px;
-            cursor: pointer;
-            background-color: var(--surface0);
-            transition: all 0.2s ease;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
+.control-button {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: var(--glass-border);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+}
 
-        .list-item:hover {
-            background-color: var(--surface1);
-        }
+.control-button:hover {
+    transform: translateY(-2px) scale(1.05);
+    background: rgba(60, 60, 75, 0.7);
+    box-shadow: 0 6px 15px rgba(0, 0, 0, 0.2);
+}
 
-        .list-item-content {
-            flex: 1;
-        }
+.control-button:active {
+    transform: translateY(0) scale(0.98);
+}
 
-        .list-item-controls {
-            display: flex;
-            gap: 8px;
-        }
+.control-button.play {
+    background: var(--play-button);
+    color: white;
+    width: 64px;
+    height: 64px;
+    box-shadow: 0 6px 15px rgba(88, 200, 160, 0.3);
+}
 
-        .item-button {
-            padding: 6px 10px;
-            border-radius: 6px;
-            background-color: transparent;
-            color: var(--subtext0);
-            border: 1px solid var(--surface1);
-            cursor: pointer;
-            transition: all 0.2s ease;
-            font-size: 0.8rem;
-        }
+.control-button.play:hover {
+    background: var(--play-button-hover);
+    box-shadow: 0 8px 20px rgba(88, 200, 160, 0.4);
+}
 
-        .item-button:hover {
-            background-color: var(--surface1);
-            color: var(--text);
-        }
+.control-button.play i {
+    font-size: 1.2rem;
+}
 
-        .item-button.play {
-            background-color: var(--green);
-            color: var(--base);
-            border: 1px solid var(--green);
-        }
+.main-content {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    flex: 1;
+    min-height: 0;
+}
 
-        .item-button.play:hover {
-            background-color: var(--teal);
-            border-color: var(--teal);
-        }
+.library-container, .queue-container {
+    background: var(--bg-tertiary);
+    backdrop-filter: blur(20px);
+    border-radius: 16px;
+    border: var(--glass-border);
+    padding: 20px;
+    box-shadow: var(--glass-shadow);
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
 
-        /* Queue item styles */
-        .queue-item {
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 8px;
-            background-color: var(--surface0);
-            transition: all 0.2s ease;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
+.container-title {
+    color: var(--text-primary);
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--divider);
+    font-size: 1.2rem;
+    font-weight: 500;
+    letter-spacing: -0.5px;
+}
 
-        .queue-item.playing {
-            background-color: var(--surface1);
-            border-left: 4px solid var(--mauve);
-        }
+.queue-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
 
-        .queue-item-info {
-            flex: 1;
-        }
+.queue-toggle-button {
+    display: none;
+    padding: 8px 12px;
+    border-radius: 20px;
+    background: var(--accent-primary);
+    color: white;
+    border: none;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+    align-items: center;
+    gap: 8px;
+}
 
-        .queue-item-title {
-            font-weight: 600;
-            margin-bottom: 4px;
-        }
+.queue-toggle-button:hover {
+    background: var(--accent-hover);
+}
 
-        .queue-item-details {
-            font-size: 0.85rem;
-            color: var(--subtext0);
-        }
+.breadcrumb {
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-tertiary);
+    padding: 8px 12px;
+    background: var(--bg-secondary);
+    border-radius: 10px;
+    backdrop-filter: blur(10px);
+    width: fit-content;
+}
 
-        .queue-item-controls {
-            display: flex;
-            gap: 8px;
-        }
+.breadcrumb a {
+    color: var(--accent-primary);
+    text-decoration: none;
+    transition: color 0.2s ease;
+    font-weight: 500;
+}
 
-        /* Custom scrollbar */
-        ::-webkit-scrollbar {
-            width: 8px;
-        }
+.breadcrumb a:hover {
+    color: var(--accent-hover);
+    text-decoration: none;
+}
 
-        ::-webkit-scrollbar-track {
-            background-color: var(--mantle);
-            border-radius: 10px;
-        }
+.breadcrumb-separator {
+    color: var(--text-tertiary);
+}
 
-        ::-webkit-scrollbar-thumb {
-            background-color: var(--surface1);
-            border-radius: 10px;
-        }
+/* List containers */
+#library-content, #queue-content {
+    overflow-y: auto;
+    flex: 1;
+    padding-right: 5px;
+}
 
-        ::-webkit-scrollbar-thumb:hover {
-            background-color: var(--surface2);
-        }
+.list-container {
+    list-style-type: none;
+}
 
-        /* Now playing display */
-        .now-playing {
-            padding: 16px;
-            background-color: var(--surface0);
-            border-radius: 12px;
-            margin-bottom: 20px;
-            display: flex;
-            align-items: center;
-            gap: 16px;
-        }
+.list-item {
+    padding: 14px;
+    border-radius: 12px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    background: var(--bg-secondary);
+    backdrop-filter: blur(10px);
+    transition: all 0.2s ease;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    border: var(--glass-border);
+}
 
-        .now-playing-cover {
-            width: 64px;
-            height: 64px;
-            background-color: var(--surface1);
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
+.list-item:hover {
+    background: rgba(50, 50, 65, 0.7);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+}
 
-        .now-playing-cover i {
-            font-size: 24px;
-            color: var(--lavender);
-        }
+.list-item-content {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 
-        .now-playing-info {
-            flex: 1;
-        }
+.list-item-controls {
+    display: flex;
+    gap: 8px;
+}
 
-        .now-playing-title {
-            font-weight: 700;
-            color: var(--text);
-            margin-bottom: 4px;
-        }
+.item-button {
+    padding: 8px 14px;
+    border-radius: 20px;
+    background: rgba(40, 40, 50, 0.6);
+    color: var(--text-secondary);
+    border: var(--glass-border);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    backdrop-filter: blur(5px);
+}
 
-        .now-playing-artist {
-            font-size: 0.9rem;
-            color: var(--subtext0);
-        }
+.item-button:hover {
+    background: rgba(50, 50, 60, 0.8);
+    color: var(--text-primary);
+    transform: translateY(-1px);
+}
 
-        /* Empty states */
-        .empty-state {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 200px;
-            color: var(--overlay0);
-            text-align: center;
-        }
+.item-button.play {
+    background: var(--play-button);
+    color: white;
+    border: none;
+}
 
-        .empty-state i {
-            font-size: 48px;
-            margin-bottom: 16px;
-            color: var(--surface1);
-        }
+.item-button.play:hover {
+    background: var(--play-button-hover);
+}
 
-        .empty-state-text {
-            font-size: 0.9rem;
-        }
+/* Queue item styles */
+.queue-item {
+    padding: 14px;
+    border-radius: 12px;
+    margin-bottom: 10px;
+    background: var(--bg-secondary);
+    backdrop-filter: blur(10px);
+    transition: all 0.2s ease;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    border: var(--glass-border);
+}
 
-        /* Media Queries */
-        @media screen and (max-width: 1024px) {
-            .app-container {
-                padding: 16px;
-            }
-            
-            .library-container, .queue-container {
-                height: calc(100vh - 180px);
-            }
-        }
-        
-        @media screen and (max-width: 768px) {
-            .app-title {
-                font-size: 1.5rem;
-            }
-            
-            .main-content {
-                grid-template-columns: 1fr;
-                gap: 16px;
-            }
-            
-            .library-container, .queue-container {
-                height: auto;
-                max-height: 400px;
-            }
-            
-            .now-playing {
-                padding: 12px;
-            }
-            
-            .player-controls {
-                padding: 12px;
-            }
-            
-            .control-button {
-                width: 36px;
-                height: 36px;
-            }
-            
-            .control-button.play {
-                width: 42px;
-                height: 42px;
-            }
-        }
-        
-        @media screen and (max-width: 480px) {
-            .app-container {
-                padding: 12px;
-            }
-            
-            .app-title {
-                font-size: 1.25rem;
-            }
-            
-            .player-controls {
-                gap: 8px;
-                padding: 10px;
-            }
-            
-            .control-button {
-                width: 32px;
-                height: 32px;
-            }
-            
-            .control-button.play {
-                width: 38px;
-                height: 38px;
-            }
-            
-            .list-item {
-                flex-direction: column;
-                align-items: flex-start;
-            }
-            
-            .list-item-controls {
-                margin-top: 8px;
-                width: 100%;
-                justify-content: flex-end;
-            }
-            
-            .now-playing-cover {
-                width: 48px;
-                height: 48px;
-            }
-            
-            .now-playing-cover i {
-                font-size: 18px;
-            }
-            
-            .now-playing-title {
-                font-size: 0.9rem;
-            }
-            
-            .now-playing-artist {
-                font-size: 0.8rem;
-            }
-            
-            .queue-item {
-                flex-direction: column;
-                align-items: flex-start;
-            }
-            
-            .queue-item-controls {
-                margin-top: 8px;
-                width: 100%;
-                justify-content: flex-end;
-            }
-            
-            .breadcrumb {
-                flex-wrap: wrap;
-            }
-        }
-        
-        /* For very small screens */
-        @media screen and (max-width: 320px) {
-            .app-title {
-                font-size: 1.1rem;
-            }
-            
-            .container-title {
-                font-size: 1rem;
-            }
-            
-            .control-button {
-                width: 28px;
-                height: 28px;
-            }
-            
-            .control-button.play {
-                width: 34px;
-                height: 34px;
-            }
-            
-            .item-button {
-                padding: 4px 8px;
-                font-size: 0.7rem;
-            }
-        }
-    </style>
+.queue-item.playing {
+    background: linear-gradient(to right, rgba(88, 120, 255, 0.2), var(--bg-secondary));
+    border-left: 3px solid var(--accent-primary);
+    transform: scale(1.02);
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.15);
+    position: relative;
+}
+
+.queue-item.playing::before {
+    content: '▶';
+    position: absolute;
+    left: -20px;
+    color: var(--accent-primary);
+    font-size: 0.8rem;
+}
+
+.queue-item-info {
+    flex: 1;
+}
+
+.queue-item-title {
+    font-weight: 600;
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.queue-item-details {
+    font-size: 0.85rem;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.queue-item-controls {
+    display: flex;
+    gap: 8px;
+}
+
+/* Empty states */
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 200px;
+    color: var(--text-tertiary);
+    text-align: center;
+    padding: 20px;
+    border-radius: 12px;
+    background: var(--bg-secondary);
+    backdrop-filter: blur(10px);
+    border: var(--glass-border);
+}
+
+.empty-state i {
+    font-size: 48px;
+    margin-bottom: 16px;
+    color: var(--text-tertiary);
+    opacity: 0.6;
+}
+
+.empty-state-text {
+    font-size: 1rem;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+    margin: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* Loading Animation */
+@keyframes spinner {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.fa-spinner {
+    animation: spinner 1.2s linear infinite;
+}
+
+/* Notifications */
+.notification {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    padding: 12px 18px;
+    border-radius: 12px;
+    box-shadow: var(--glass-shadow);
+    backdrop-filter: blur(10px);
+    border: var(--glass-border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    z-index: 1000;
+    animation: fadeIn 0.3s forwards;
+}
+
+.notification.success {
+    border-left: 3px solid var(--success);
+}
+
+.notification.error {
+    border-left: 3px solid var(--error);
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Mobile queue toggle button animation */
+@keyframes slideDown {
+    from {
+        max-height: 0;
+        opacity: 0;
+    }
+    to {
+        max-height: 300px;
+        opacity: 1;
+    }
+}
+
+@keyframes slideUp {
+    from {
+        max-height: 300px;
+        opacity: 1;
+    }
+    to {
+        max-height: 0;
+        opacity: 0;
+    }
+}
+
+.queue-collapsed {
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-height 0.3s ease, opacity 0.3s ease;
+}
+
+.queue-expanded {
+    max-height: 300px;
+    overflow-y: auto;
+    opacity: 1;
+    transition: max-height 0.3s ease, opacity 0.3s ease;
+}
+
+.queue-mini-display {
+    display: none;
+    padding: 12px;
+    background: var(--bg-secondary);
+    border-radius: 12px;
+    margin-bottom: 10px;
+    align-items: center;
+    justify-content: space-between;
+    border: var(--glass-border);
+}
+
+.queue-count {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.queue-count span {
+    color: var(--accent-primary);
+}
+
+/* Media Queries */
+@media screen and (max-width: 1024px) {
+    .app-container {
+        padding: 16px;
+    }
+    
+    .now-playing {
+        padding: 16px;
+    }
+    
+    .player-controls {
+        padding: 16px;
+    }
+    
+    .library-container, .queue-container {
+        padding: 16px;
+    }
+}
+
+.now-playing-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--accent-primary);
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+
+.now-playing-indicator i {
+    animation: pulse 1s infinite;
+}
+
+.queue-now-playing {
+    display: none;
+}
+
+.queue-swipe-hint {
+    display: none;
+    text-align: center;
+    color: var(--text-tertiary);
+    font-size: 0.8rem;
+    margin-top: 8px;
+    animation: fadeIn 1s forwards;
+}
+
+.queue-mini-display:active .queue-swipe-hint {
+    display: block;
+}
+
+/* Queue swipe handle styling */
+.queue-swipe-handle {
+    display: none;
+    width: 40px;
+    height: 4px;
+    background: var(--divider);
+    border-radius: 4px;
+    margin: 0 auto 8px auto;
+}
+
+@media screen and (max-width: 768px) {
+    .queue-swipe-handle {
+        display: block;
+    }
+}
+    .app-title {
+        font-size: 1.5rem;
+    }
+    
+    .main-content {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+    
+    .now-playing-cover {
+        width: 60px;
+        height: 60px;
+    }
+    
+    .now-playing-title {
+        font-size: 1.1rem;
+    }
+    
+    .now-playing-artist {
+        font-size: 0.9rem;
+    }
+    
+    .control-button {
+        width: 42px;
+        height: 42px;
+    }
+    
+    .control-button.play {
+        width: 56px;
+        height: 56px;
+    }
+    
+    /* Queue toggle for mobile */
+    .queue-container {
+        margin-top: 16px;
+        max-height: none;
+    }
+    
+    .queue-toggle-button {
+        display: flex;
+    }
+    
+    .queue-header {
+        margin-bottom: 12px;
+    }
+    
+    .queue-mini-display {
+        display: flex;
+    }
+    
+    .queue-now-playing {
+        display: flex;
+        align-items: center;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        max-width: 60%;
+    }
+}
+
+@media screen and (max-width: 480px) {
+    .app-container {
+        padding: 12px;
+    }
+    
+    .app-title {
+        font-size: 1.25rem;
+    }
+    
+    .player-controls {
+        gap: 10px;
+        padding: 12px;
+    }
+    
+    .control-button {
+        width: 36px;
+        height: 36px;
+    }
+    
+    .control-button.play {
+        width: 48px;
+        height: 48px;
+    }
+    
+    .now-playing {
+        padding: 12px;
+    }
+    
+    .now-playing-cover {
+        width: 50px;
+        height: 50px;
+    }
+    
+    .list-item, .queue-item {
+        padding: 12px;
+    }
+    
+    .item-button {
+        padding: 6px 10px;
+    }
+    
+    .container-title {
+        font-size: 1.1rem;
+    }
+}
+
+@media screen and (max-width: 320px) {
+    .app-title {
+        font-size: 1.1rem;
+    }
+    
+    .control-button {
+        width: 32px;
+        height: 32px;
+    }
+    
+    .control-button.play {
+        width: 42px;
+        height: 42px;
+    }
+    
+    .now-playing-cover {
+        width: 40px;
+        height: 40px;
+    }
+    
+    .now-playing-title {
+        font-size: 1rem;
+    }
+    
+    .now-playing-artist {
+        font-size: 0.8rem;
+    }
+}    </style>
 </head>
 <body>
     <div class="app-container">
@@ -514,9 +841,7 @@
         </div>
 
         <div class="player-controls">
-            <button id="previous-button" class="control-button">
-                <i class="fas fa-step-backward"></i>
-            </button>
+         
             <button id="play-button" class="control-button play">
                 <i class="fas fa-play"></i>
             </button>
@@ -541,8 +866,23 @@
             </div>
 
             <div class="queue-container">
-                <h2 class="container-title">Queue</h2>
-                <div id="queue-content"></div>
+                <div class="queue-header">
+                    <h2 class="container-title">Queue</h2>
+                    <button id="queue-toggle-button" class="queue-toggle-button">
+                        <i class="fas fa-chevron-down"></i> Show Queue
+                    </button>
+                </div>
+                
+                <div id="queue-mini-display" class="queue-mini-display">
+                    <div class="queue-count">Queue: <span id="queue-count">0</span> songs</div>
+                    <div id="queue-now-playing" class="queue-now-playing">
+                        <div class="now-playing-indicator"><i class="fas fa-volume-up"></i></div>
+                        <div id="mini-now-playing-title">Nothing playing</div>
+                    </div>
+                    <div class="queue-swipe-hint">Swipe up to show queue</div>
+                </div>
+                
+                <div id="queue-content" class="queue-expanded"></div>
             </div>
         </div>
     </div>
@@ -553,24 +893,99 @@
         let currentArtist = null;
         let currentAlbum = null;
         let eventSource = null;
+        let isQueueExpanded = true;
         
-        // Initialize the app
         document.addEventListener('DOMContentLoaded', function() {
-            // Set up event listeners for player controls
             document.getElementById('play-button').addEventListener('click', playMusic);
             document.getElementById('pause-button').addEventListener('click', pauseMusic);
             document.getElementById('stop-button').addEventListener('click', stopMusic);
             document.getElementById('next-button').addEventListener('click', nextSong);
-            document.getElementById('previous-button').addEventListener('click', previousSong);
             
-            // Initial library load
+            document.getElementById('queue-toggle-button').addEventListener('click', toggleQueue);
+            
+            const savedQueueState = localStorage.getItem('queueExpanded');
+            if (savedQueueState !== null) {
+                isQueueExpanded = savedQueueState === 'true';
+            } else if (window.innerWidth <= 768) {
+                // Default to collapsed on mobile if no preference saved
+                isQueueExpanded = false;
+            }
+            
+            // Apply the queue visibility state
+            updateQueueVisibility();
+            
+           window.addEventListener('resize', function() {
+                if (window.innerWidth > 768) {
+                    // On desktop, always show queue
+                    document.getElementById('queue-content').className = 'queue-expanded';
+                    document.getElementById('queue-mini-display').style.display = 'none';
+                } else {
+                    // On mobile, respect the toggle state
+                    updateQueueVisibility();
+                    document.getElementById('queue-mini-display').style.display = 'flex';
+                }
+            });
+            
+            document.querySelector('.queue-header').addEventListener('dblclick', function(e) {
+                if (!e.target.closest('#queue-toggle-button')) {
+                    toggleQueue();
+                }
+            });
+            
+            const queueMiniDisplay = document.getElementById('queue-mini-display');
+            let touchStartY = 0;
+            let touchEndY = 0;
+            
+            queueMiniDisplay.addEventListener('touchstart', function(e) {
+                touchStartY = e.changedTouches[0].screenY;
+            }, false);
+            
+            queueMiniDisplay.addEventListener('touchend', function(e) {
+                touchEndY = e.changedTouches[0].screenY;
+                handleSwipe();
+            }, false);
+            
+            function handleSwipe() {
+                if (touchStartY - touchEndY > 50 && !isQueueExpanded) {
+                    isQueueExpanded = true;
+                    updateQueueVisibility();
+                }
+                else if (touchEndY - touchStartY > 50 && isQueueExpanded) {
+                    isQueueExpanded = false;
+                    updateQueueVisibility();
+                }
+            }
+
             loadLibrary();
             
-            // Initialize SSE connection
             initEventSource();
         });
+
+         function toggleQueue() {
+            isQueueExpanded = !isQueueExpanded;
+            updateQueueVisibility();
+        }
         
-        // Initialize Server-Sent Events
+        function updateQueueVisibility() {
+            const queueContent = document.getElementById('queue-content');
+            const toggleBtn = document.getElementById('queue-toggle-button');
+            const miniToggleBtn = document.getElementById('mini-queue-toggle-button');
+            
+            if (isQueueExpanded) {
+                queueContent.className = 'queue-expanded';
+                toggleBtn.innerHTML = '<i class="fas fa-chevron-up"></i> Hide Queue';
+                
+                // Save preference in local storage
+                localStorage.setItem('queueExpanded', 'true');
+            } else {
+                queueContent.className = 'queue-collapsed';
+                toggleBtn.innerHTML = '<i class="fas fa-chevron-down"></i> Show Queue';
+                
+                // Save preference in local storage
+                localStorage.setItem('queueExpanded', 'false');
+            }
+        }
+        
         function initEventSource() {
             if (eventSource) {
                 eventSource.close();
@@ -580,9 +995,9 @@
             connectionStatus.className = 'connection-status connecting';
             connectionStatus.textContent = 'Connecting...';
             
-            eventSource = new EventSource('/events');
+            eventSource = new
+            EventSource('/events');
             
-            // SSE connection opened
             eventSource.onopen = function() {
                 connectionStatus.className = 'connection-status connected';
                 connectionStatus.textContent = 'Connected';
@@ -593,6 +1008,16 @@
                 try {
                     const queueStatus = JSON.parse(event.data);
                     updateQueueUI(queueStatus);
+                    const queueCountElement = document.getElementById('queue-count');
+                    if (queueStatus.queue && queueCountElement) {
+                        queueCountElement.textContent = queueStatus.queue.length;
+                        
+                        // If queue becomes empty, update UI accordingly
+                        if (queueStatus.queue.length === 0 && isQueueExpanded) {
+                            isQueueExpanded = false;
+                            updateQueueVisibility();
+                        }
+                    }
                 } catch (e) {
                     console.error('Error parsing queue update:', e);
                 }
@@ -642,7 +1067,7 @@
         }
         
         function updatePlayPauseButton() {
-      
+            console.log(isPlaying, "isPlaying")
             const playButton = document.getElementById('play-button');
             playButton.style.display = isPlaying ? 'none' : 'flex';
             
@@ -650,21 +1075,24 @@
             pauseButton.style.display = isPlaying ? 'flex' : 'none';
         }
         
-        // Helper to get the currently playing queue index
         function getCurrentQueueIndex() {
             const playingItem = document.querySelector('.queue-item.playing');
             return playingItem ? parseInt(playingItem.dataset.index) : null;
         }
         
-        // Helper to update the now playing display
         function updateNowPlaying(song) {
             const nowPlaying = document.getElementById('now-playing');
             const nowPlayingTitle = nowPlaying.querySelector('.now-playing-title');
             const nowPlayingArtist = nowPlaying.querySelector('.now-playing-artist');
+            const miniNowPlayingTitle = document.getElementById('mini-now-playing-title');
             
             if (song) {
                 nowPlayingTitle.textContent = song.title;
                 nowPlayingArtist.textContent = `${song.artist} - ${song.album}`;
+             if (miniNowPlayingTitle) {
+                    miniNowPlayingTitle.textContent = song.title;
+                    document.getElementById('queue-now-playing').style.display = 'flex';
+                }
             } else {
                 nowPlayingTitle.textContent = 'Nothing playing';
                 nowPlayingArtist.textContent = 'Select a song to start playback';
@@ -978,19 +1406,16 @@
                         album: ''
                     });
                 });
-            // No need to manually update UI as we'll get an SSE event
+        
         }
         
-        // Play a specific song in the queue
         function playQueueIndex(index) {
             fetch(`/play_queue_index/${index}`)
                 .catch(error => {
                     console.error('Error playing queue index:', error);
                 });
-            // No need to manually update UI as we'll get an SSE event
         }
         
-        // Update queue UI based on queue status from SSE
         function updateQueueUI(queueStatus) {
             const queueContent = document.getElementById('queue-content');
             

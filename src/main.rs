@@ -30,8 +30,6 @@ enum AudioCommand {
     Stop,
     Next,
     Previous,
-    Increment,
-    GetCurrentTrack,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -446,8 +444,6 @@ async fn next_song(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     }
     // state.current_index.store(0, Ordering::Relaxed);
 
-    // broadcast_queue_update(&state);
-
     Html("Playing next song".into())
 }
 
@@ -492,41 +488,12 @@ async fn pause_music(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         *is_playing = false;
     }
 
-    // broadcast_queue_update(&state);
-
     Html("Pausing music".into())
-}
-
-fn broadcast_queue_update(state: &Arc<AppState>) {
-    // Safely get the queue status
-    if let Ok(queue) = state.song_queue.lock() {
-        let current_index = state.current_index.load(Ordering::Relaxed);
-        let is_playing = if let Ok(playing) = state.is_playing.lock() {
-            *playing
-        } else {
-            false // Default if we can't get the lock
-        };
-
-        println!("{}", current_index);
-
-        let queue_status = QueueStatus {
-            current_index,
-            queue: queue.clone(),
-            is_playing,
-        };
-
-        if let Ok(json) = serde_json::to_string(&queue_status) {
-            let _ = state.sse_tx.send(SseEvent {
-                event_type: "queue_update".to_string(),
-                data: json,
-            });
-        }
-    }
 }
 
 async fn audio_player(
     mut rx: mpsc::Receiver<AudioCommand>,
-    state: Arc<AppState>,
+    _state: Arc<AppState>,
     queue: Arc<Mutex<Vec<Song>>>,
     current_index: Arc<AtomicU32>,
     is_playing: Arc<Mutex<bool>>,
@@ -603,16 +570,61 @@ async fn audio_player(
                         );
                     }
                     AudioCommand::Next => {
-                        sink.skip_one();
+                        sink.stop();
 
-                        {
+                        let next_song_path: Option<String> = {
                             let mut queue = queue.lock().unwrap();
-                            if !queue.is_empty() {
-                                queue.remove(0);
-                            }
-                        }
 
-                        current_index.store(0, Ordering::Relaxed);
+                            if queue.len() < 1 {
+                                None
+                            } else {
+                                queue.remove(0);
+
+                                queue.get(0).map(|song| song.path.clone())
+                            }
+                        };
+
+                        if let Some(path) = next_song_path {
+                            let file = BufReader::new(File::open(path).unwrap());
+                            let source = Decoder::new(file).unwrap();
+                            sink.append(source);
+
+                            let idx_clone = current_index.clone();
+                            let sse_tx_clone = sse_tx.clone();
+                            let queue_clone = queue.clone();
+                            let is_playing_clone = is_playing.clone();
+
+                            sink.append(rodio::source::EmptyCallback::<f32>::new(Box::new(
+                                move || {
+                                    idx_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+                                    if let Ok(queue_data) = queue_clone.lock() {
+                                        let current_idx = idx_clone.load(Ordering::Relaxed);
+                                        let is_playing_val =
+                                            if let Ok(play) = is_playing_clone.lock() {
+                                                *play
+                                            } else {
+                                                false
+                                            };
+
+                                        let queue_status = QueueStatus {
+                                            current_index: current_idx,
+                                            queue: queue_data.clone(),
+                                            is_playing: is_playing_val,
+                                        };
+
+                                        if let Ok(json) = serde_json::to_string(&queue_status) {
+                                            let _ = sse_tx_clone.send(SseEvent {
+                                                event_type: "queue_update".to_string(),
+                                                data: json,
+                                            });
+                                        }
+                                    }
+                                },
+                            )));
+
+                            current_index.store(0, Ordering::Relaxed);
+                        }
 
                         broadcast_queue_update_from_state(
                             &queue,
@@ -689,12 +701,14 @@ async fn audio_player(
                                     }
                                 },
                             )));
-
+                            broadcast_queue_update_from_state(
+                                &queue,
+                                &current_index,
+                                &is_playing,
+                                &sse_tx,
+                            );
                             current_index.store(0, Ordering::Relaxed);
                         }
-                    }
-                    AudioCommand::Increment => {
-                        current_index.fetch_add(1, Ordering::Relaxed);
                     }
                     _ => {}
                 }
