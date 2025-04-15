@@ -128,14 +128,13 @@ The frontend is built with vanilla JavaScript and modern CSS features:
 
 ## Not Implemented (Yet)
 
-- Queue management could be improved with drag-and-drop reordering
-- No volume control in the current version
+- Queue management could be improved with drag-and-drop reordering - would be cool, maybe
+- No volume control in the current version - working on
 - Limited audio format support (depends on Rodio capabilities)
-- Add search functionality
-- Implement playlist support
+- Add search functionality - working on 
+- Implement playlist support 
 - Add audio visualizations
-- Support for online streaming sources
-- Audio equalizer
+- Support for online streaming sources - wishlist 
 - Dark/light theme toggle
 
 ## License
