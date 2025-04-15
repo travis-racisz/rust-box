@@ -1,4 +1,4 @@
-# Rust Box
+# Rust Box 🎶
 
 A modern web-based music player built with Rust (backend) and vanilla JavaScript (frontend), featuring a sleek, glass-inspired UI.
 
