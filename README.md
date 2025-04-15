@@ -1,6 +1,6 @@
 # Rust Box 🎶
 
-A modern web-based music player built with Rust (backend) and vanilla JavaScript (frontend), featuring a sleek, glass-inspired UI.
+A jukebox, multiple people can connect to the server and all play music locally on your network. 
 
 ![RustBox](https://github.com/user-attachments/assets/9f4e5230-5e8d-47fb-8fa8-edc625f298df)
 
@@ -48,6 +48,10 @@ A modern web-based music player built with Rust (backend) and vanilla JavaScript
 
 - Rust (stable version) and Cargo
 - Local music collection organized by Artist/Album folders
+> [!IMPORTANT]
+> People that want to connect to the server need to be on the same local network
+> and to connect to it they would need to access the machines ip address for example
+> 192.169.1.4:3000 
 
 ### Installation
 
