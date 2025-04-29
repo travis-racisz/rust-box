@@ -1,4 +1,5 @@
-use axum::extract::{Path, State};
+use axum::extract::{Path, State, Query};
+use audiotags::Tag;
 use axum::{
     Json, Router,
     response::{Html, IntoResponse, Sse},
@@ -16,6 +17,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::spawn_blocking;
 use tower_http::services::ServeDir;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SseEvent {
@@ -30,6 +32,7 @@ enum AudioCommand {
     Stop,
     Next,
     Previous,
+    SetVolume(f32),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,6 +48,7 @@ struct Album {
     artist: String,
     title: String,
     cover_art_path: String,
+    filename: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -52,6 +56,16 @@ struct QueueStatus {
     current_index: u32,
     queue: Vec<Song>,
     is_playing: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct SearchResult {
+    title: String,
+    artist: String,
+    album: String,
+    cover_art_path: String,
+    file_extension: String,
+    filename: String,
 }
 
 struct AppState {
@@ -159,6 +173,8 @@ async fn main() {
             "/{artist}/{album}",
             get(move |path| get_artist_albums(path)),
         )
+        .route("/search", get(search_songs))
+        .route("/set_volume", get(set_volume))
         .nest_service("/assets", ServeDir::new("assets"))
         .with_state(app_state);
 
@@ -261,6 +277,7 @@ async fn get_artist_dir(Path(artist): Path<String>) -> Json<Vec<Album>> {
                         artist_albums.push(Album {
                             artist: artist.clone(),
                             title: album_name.to_owned(),
+                            filename: cover_art_path.clone(),
                             cover_art_path,
                         });
                     }
@@ -295,19 +312,36 @@ async fn get_artist_albums(Path((artist, album)): Path<(String, String)>) -> Jso
             }
 
             // Second pass - process song files
-            if let Ok(entries) = std::fs::read_dir(format!("assets/music/{}/{}", artist, album)) {
+            let path = format!("assets/music/{}/{}", artist, album);
+            if let Ok(entries) = std::fs::read_dir(path) {
                 for entry in entries {
                     if let Ok(entry) = entry {
                         if let Some(filename) = entry.file_name().to_str() {
-                            if filename.ends_with(".flac")
-                                || filename.ends_with(".mp3")
-                                || filename.ends_with(".wav")
-                            {
-                                artist_albums.push(Album {
-                                    artist: artist.clone(),
-                                    title: filename.to_owned(),
-                                    cover_art_path: cover.clone(),
-                                });
+                            let song_path = format!("assets/music/{}/{}/{}", artist, album, filename);
+                            
+                            // Check if file has a valid audio extension
+                            if let Some(ext) = std::path::Path::new(filename).extension() {
+                                let ext = ext.to_string_lossy().to_lowercase();
+                                if ext == "flac" || ext == "wav" || ext == "mp3" || ext == "mp4" {
+                                    // Try to read metadata from the audio file
+                                    let title = if let Ok(tags) = Tag::default().read_from_path(&song_path) {
+                                        // Use the title from metadata if available
+                                        tags.title().map(|t| t.to_string()).unwrap_or_else(|| {
+                                            // Fallback to filename without extension
+                                            filename.rsplit_once('.').map(|(name, _)| name.to_string()).unwrap_or_else(|| filename.to_string())
+                                        })
+                                    } else {
+                                        // Fallback to filename without extension if metadata reading fails
+                                        filename.rsplit_once('.').map(|(name, _)| name.to_string()).unwrap_or_else(|| filename.to_string())
+                                    };
+                                    
+                                    artist_albums.push(Album {
+                                        artist: artist.clone(),
+                                        title: title,
+                                        filename: filename.to_string(),
+                                        cover_art_path: cover.clone(),
+                                    });
+                                }
                             }
                         }
                     }
@@ -502,12 +536,16 @@ async fn audio_player(
     spawn_blocking(move || {
         let (_stream, stream_handle) = OutputStream::try_default().unwrap();
         let sink = Sink::try_new(&stream_handle).unwrap();
+        let mut current_volume = 0.5;
+        
         loop {
             if let Ok(cmd) = rx.try_recv() {
                 match cmd {
                     AudioCommand::Play(path) => {
+                        println!("{:?}", path);
                         let file = BufReader::new(File::open(path).unwrap());
                         let source = Decoder::new(file).unwrap();
+                        sink.set_volume(current_volume);
                         sink.append(source);
 
                         let idx_clone = current_index.clone();
@@ -710,6 +748,10 @@ async fn audio_player(
                             current_index.store(0, Ordering::Relaxed);
                         }
                     }
+                    AudioCommand::SetVolume(volume) => {
+                        current_volume = volume.clamp(0.0, 1.0);
+                        sink.set_volume(current_volume);
+                    }
                     _ => {}
                 }
             }
@@ -745,4 +787,202 @@ fn broadcast_queue_update_from_state(
             });
         }
     }
+}
+
+async fn search_songs(Query(params): Query<HashMap<String, String>>) -> Json<Vec<SearchResult>> {
+    let query = params.get("q").unwrap_or(&String::new()).to_lowercase();
+    let filter = params.get("filter").unwrap_or(&String::from("all")).to_lowercase();
+    let mut results = Vec::new();
+
+    // If query is empty, return empty results
+    if query.is_empty() {
+        return Json(results);
+    }
+
+    // Read the music directory
+    if let Ok(artists) = std::fs::read_dir("assets/music") {
+        for artist_entry in artists.flatten() {
+            let artist_name = artist_entry.file_name().to_string_lossy().into_owned();
+            
+            // Search in artist name if filter is "all" or "artists"
+            if (filter == "all" || filter == "artists") && artist_name.to_lowercase().contains(&query) {
+                // Add all albums by this artist
+                if let Ok(albums) = std::fs::read_dir(artist_entry.path()) {
+                    for album_entry in albums.flatten() {
+                        let album_name = album_entry.file_name().to_string_lossy().into_owned();
+                        let mut cover_art = String::new();
+                        
+                        // Find cover art
+                        if let Ok(files) = std::fs::read_dir(album_entry.path()) {
+                            for file in files.flatten() {
+                                if let Some(ext) = file.path().extension() {
+                                    if ext == "jpg" || ext == "png" {
+                                        cover_art = file.file_name().to_string_lossy().into_owned();
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Add all songs in this album if filter is "all" or "songs"
+                        if filter == "all" || filter == "songs" {
+                            if let Ok(songs) = std::fs::read_dir(album_entry.path()) {
+                                for song_entry in songs.flatten() {
+                                    if let Some(ext) = song_entry.path().extension() {
+                                        if ext == "mp3" || ext == "flac" || ext == "wav" {
+                                            let song_path = song_entry.path();
+                                            let song_name = if let Ok(tags) = Tag::default().read_from_path(&song_path) {
+                                                // Use the title from metadata if available
+                                                tags.title().map(|t| t.to_string()).unwrap_or_else(|| {
+                                                    // Fallback to filename without extension
+                                                    song_entry.file_name()
+                                                        .to_string_lossy()
+                                                        .replace(&format!(".{}", ext.to_string_lossy()), "")
+                                                        .to_owned()
+                                                })
+                                            } else {
+                                                // Fallback to filename without extension if metadata reading fails
+                                                song_entry.file_name()
+                                                    .to_string_lossy()
+                                                    .replace(&format!(".{}", ext.to_string_lossy()), "")
+                                                    .to_owned()
+                                            };
+                                            
+                                            results.push(SearchResult {
+                                                title: song_name,
+                                                artist: artist_name.clone(),
+                                                album: album_name.clone(),
+                                                cover_art_path: cover_art.clone(),
+                                                file_extension: ext.to_string_lossy().into_owned(),
+                                                filename: song_entry.file_name().to_string_lossy().into_owned(),
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Search in albums and songs
+                if let Ok(albums) = std::fs::read_dir(artist_entry.path()) {
+                    for album_entry in albums.flatten() {
+                        let album_name = album_entry.file_name().to_string_lossy().into_owned();
+                        let mut cover_art = String::new();
+                        
+                        // Find cover art
+                        if let Ok(files) = std::fs::read_dir(album_entry.path()) {
+                            for file in files.flatten() {
+                                if let Some(ext) = file.path().extension() {
+                                    if ext == "jpg" || ext == "png" {
+                                        cover_art = file.file_name().to_string_lossy().into_owned();
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Search in album name if filter is "all" or "albums"
+                        if (filter == "all" || filter == "albums") && album_name.to_lowercase().contains(&query) {
+                            // Add all songs in this album if filter is "all" or "songs"
+                            if filter == "all" || filter == "songs" {
+                                if let Ok(songs) = std::fs::read_dir(album_entry.path()) {
+                                    for song_entry in songs.flatten() {
+                                        if let Some(ext) = song_entry.path().extension() {
+                                            if ext == "mp3" || ext == "flac" || ext == "wav" {
+                                                let song_path = song_entry.path();
+                                                let song_name = if let Ok(tags) = Tag::default().read_from_path(&song_path) {
+                                                    // Use the title from metadata if available
+                                                    tags.title().map(|t| t.to_string()).unwrap_or_else(|| {
+                                                        // Fallback to filename without extension
+                                                        song_entry.file_name()
+                                                            .to_string_lossy()
+                                                            .replace(&format!(".{}", ext.to_string_lossy()), "")
+                                                            .to_owned()
+                                                    })
+                                                } else {
+                                                    // Fallback to filename without extension if metadata reading fails
+                                                    song_entry.file_name()
+                                                        .to_string_lossy()
+                                                        .replace(&format!(".{}", ext.to_string_lossy()), "")
+                                                        .to_owned()
+                                                };
+                                                
+                                                results.push(SearchResult {
+                                                    title: song_name,
+                                                    artist: artist_name.clone(),
+                                                    album: album_name.clone(),
+                                                    cover_art_path: cover_art.clone(),
+                                                    file_extension: ext.to_string_lossy().into_owned(),
+                                                    filename: song_entry.file_name().to_string_lossy().into_owned(),
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else if filter == "all" || filter == "songs" {
+                            // Search in song names
+                            if let Ok(songs) = std::fs::read_dir(album_entry.path()) {
+                                for song_entry in songs.flatten() {
+                                    if let Some(ext) = song_entry.path().extension() {
+                                        if ext == "mp3" || ext == "flac" || ext == "wav" {
+                                            let song_path = song_entry.path();
+                                            let song_name = if let Ok(tags) = Tag::default().read_from_path(&song_path) {
+                                                // Use the title from metadata if available
+                                                tags.title().map(|t| t.to_string()).unwrap_or_else(|| {
+                                                    // Fallback to filename without extension
+                                                    song_entry.file_name()
+                                                        .to_string_lossy()
+                                                        .replace(&format!(".{}", ext.to_string_lossy()), "")
+                                                        .to_owned()
+                                                })
+                                            } else {
+                                                // Fallback to filename without extension if metadata reading fails
+                                                song_entry.file_name()
+                                                    .to_string_lossy()
+                                                    .replace(&format!(".{}", ext.to_string_lossy()), "")
+                                                    .to_owned()
+                                            };
+                                            
+                                            if song_name.to_lowercase().contains(&query) {
+                                                results.push(SearchResult {
+                                                    title: song_name,
+                                                    artist: artist_name.clone(),
+                                                    album: album_name.clone(),
+                                                    cover_art_path: cover_art.clone(),
+                                                    file_extension: ext.to_string_lossy().into_owned(),
+                                                    filename: song_entry.file_name().to_string_lossy().into_owned(),
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Limit results to 20 to prevent overwhelming the client
+    results.truncate(20);
+    Json(results)
+}
+
+async fn set_volume(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Some(volume_str) = params.get("volume") {
+        if let Ok(volume) = volume_str.parse::<f32>() {
+            if let Err(e) = state.audio_tx.send(AudioCommand::SetVolume(volume)).await {
+                eprintln!("Failed to set volume: {}", e);
+                return Html::<String>("Error setting volume".into());
+            }
+            return Html(format!("Volume set to {}", volume).into());
+        }
+    }
+    Html::<String>("Invalid volume value".into())
 }
