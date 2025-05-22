@@ -1,6 +1,6 @@
 # Rust Box 🎶
 
-A jukebox, multiple people can connect to the server and all play music locally on your network. 
+Create a listen party with your offline music library
 
 ![RustBox](https://github.com/user-attachments/assets/9f4e5230-5e8d-47fb-8fa8-edc625f298df)
 
@@ -12,8 +12,6 @@ A jukebox, multiple people can connect to the server and all play music locally 
 - 📚 Browse your music library by artist and album
 - 📋 Queue management for continuous playback
 - 📱 Responsive design that works on desktop and mobile devices
-- 🔄 Real-time updates via Server-Sent Events (SSE)
-- 🎨 Modern glass UI with Catppuccin-inspired theming
 
 ## Technology Stack
 
